@@ -1,0 +1,8 @@
+.vscode
+.nextflow*
+work
+.DS_Store
+.Rproj.user
+.RData
+.Rhistory
+sc2.fa
