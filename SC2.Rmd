@@ -1,0 +1,443 @@
+---
+title: "SC2 Bayesian bridge"
+author: "Mathieu Fourment"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output: 
+  pdf_document:
+    number_sections: true
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(knitr)
+library(data.table)
+library(jsonlite)
+library(stringr)
+knitr::opts_chunk$set(echo = TRUE, fig.path = "Figs/")
+```
+
+
+The topology is fixed (iqtree + lsd2) and simple Bayesian bridge (no local scales) is used.
+
+\newpage
+
+```{r}
+resultsdir = file.path("results", "SC2")
+freqs = c(0.2988387179135696,
+          0.18371883310279738,
+          0.1958960436176954,
+          0.32154640536593765)
+```
+
+
+# GTR models
+```{r}
+df.beast.gtr = fread(file.path(resultsdir, "beast", "GTR", "skyglide", "SC2_GTR.log"),
+    sep = "\t", skip = "state"
+)
+df.beast.gtr = df.beast.gtr[(nrow(df.beast.gtr) * 0.5):nrow(df.beast.gtr), ]
+
+df.beast.gtr.rates = df.beast.gtr %>%
+  select(starts_with("gtr.rates") | starts_with("frequencies")) %>%
+  rename_with(~ str_replace(., "gtr.rates.rate", "")) %>%
+  rename(
+    freqA = "frequencies1", freqC = "frequencies2",
+    freqG = "frequencies3", freqT = "frequencies4"
+  ) %>%
+  mutate(rateSum = select(., AC, AG, AT, CG, CT, GT) %>%
+    rowSums()) %>%
+  mutate_at(
+    c("AC", "AG", "AT", "CG", "CT", "GT"),
+    ~ . / rateSum
+  ) %>%
+  mutate(
+    CA = AC * freqA, GA = AG * freqA, TA = AT * freqA,
+    GC = CG * freqC, TC = CT * freqC, TG = GT * freqG
+  ) %>%
+  mutate(
+    AC = AC * freqC, AG = AG * freqG, AT = AT * freqT,
+    CG = CG * freqG, CT = CT * freqT, GT = GT * freqT
+  ) %>%
+  mutate(norm = ((AC + AG + AT) * freqs[1] + (CA + CG + CT) * freqs[2] +
+    (GA + GC + GT) * freqs[3] + (TA + TC + TG) * freqs[4])) %>%
+  mutate_at(
+    c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG"),
+    ~ . / norm
+  ) %>%
+  select(!starts_with("freq"), -rateSum, -norm) %>%
+  mutate(type = "GTR-beast") %>%
+  gather("param", "value", -type)
+
+df.t.gtr = fread(
+  #file.path(resultsdir, "torchtree", "GTR", "skyglide", "ELBO", "samples.csv"),
+  file.path(resultsdir, "torchtree", "GTR2", "ELBO", "samples.csv"),
+  sep = "\t")
+
+t.lookup.gtr = c(
+  AC = "substmodel.rates.0", AG = "substmodel.rates.1", AT = "substmodel.rates.2",
+  CG = "substmodel.rates.3", CT = "substmodel.rates.4", GT = "substmodel.rates.5"
+)
+
+df.t.gtr.rates = df.t.gtr %>%
+  select(starts_with("substmodel.rates")) %>%
+  rename(all_of(t.lookup.gtr)) %>%
+  mutate(
+    CA = AC * freqs[1], GA = AG * freqs[1], TA = AT * freqs[1],
+    GC = CG * freqs[2], TC = CT * freqs[2], TG = GT * freqs[3]
+  ) %>%
+  mutate(
+    AC = AC * freqs[2], AG = AG * freqs[3], AT = AT * freqs[4],
+    CG = CG * freqs[3], CT = CT * freqs[4], GT = GT * freqs[4]
+  ) %>%
+  mutate(norm = ((AC + AG + AT) * freqs[1] + (CA + CG + CT) * freqs[2] +
+    (GA + GC + GT) * freqs[3] + (TA + TC + TG) * freqs[4])) %>%
+  mutate_at(
+    c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG"),
+    ~ . / norm
+  ) %>%
+  select(-norm) %>%
+    mutate(type = "GTR") %>%
+    gather("param", "value", -type)
+
+beast.gtr.other = df.beast.gtr %>%
+  select(
+    all_of(c("likelihood", "alpha", "treeModel.rootHeight")),
+    starts_with("gtr.rates")
+  ) %>%
+  rename_with(~ str_replace(., "gtr.rates.rate", "")) %>%
+  mutate_at(c("AC", "AG", "AT", "CG", "CT", "GT"), ~ . / 6) %>%
+  rename(
+    rootHeight = "treeModel.rootHeight"
+  ) %>%
+  mutate(type = "beast") %>%
+  gather("param", "value", -type)
+
+t.gtr.other = df.t.gtr %>%
+  select(
+    like, sitemodel.shape.0, tree.root_height.0,
+    starts_with("substmodel.rates")
+    ) %>%
+  rename(all_of(t.lookup.gtr)) %>%
+  rename(all_of(c(
+    likelihood = "like", alpha = "sitemodel.shape.0",
+    rootHeight = "tree.root_height.0"
+  ))) %>%
+  mutate(type = "torchtree") %>%
+  gather("param", "value", -type)
+
+gtr.other = rbind(beast.gtr.other, t.gtr.other)
+```
+
+```{r}
+ggplot(gtr.other, aes(value, group = type, colour = type)) +
+  geom_density() +
+  facet_wrap( ~ param, scales = "free")
+```
+
+\newpage
+
+# HKY-RE models
+```{r}
+df.beast = fread(
+  file.path(resultsdir, "beast", "HKY-RE", "skyglide", "SC2_MH.log"),
+  sep = "\t",
+  skip = "state"
+)
+df.beast = df.beast[(nrow(df.beast) * 0.5):nrow(df.beast),]
+beast.coefs = df.beast %>% select(starts_with("glmRandCoefficients"))
+
+lookup = sapply(1:12, function(x) {
+  paste0("glmRandCoefficients", x)
+})
+names(lookup) = c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG")
+
+beast.coefs = beast.coefs %>%
+  rename(all_of(lookup)) %>%
+  mutate(type = "BEAST") %>%
+  gather("param", "value",-type)
+
+df.t = fread(file.path(resultsdir, "torchtree", "HKY-RE", "skyglide", "ELBO", "samples.csv"),
+             sep = "\t")
+t.coefs = df.t %>% select(starts_with("substmodel.kappa.random"))
+
+lookup = sapply(0:11, function(x) {
+  paste0("substmodel.kappa.random.", x)
+})
+names(lookup) = c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG")
+
+t.coefs = t.coefs %>%
+  rename(all_of(lookup)) %>%
+  mutate(type = "torchtree") %>%
+  gather("param", "value",-type)
+
+coefs = rbind(t.coefs, beast.coefs)
+```
+
+\newpage
+
+## Random effects ($\epsilon$)
+```{r}
+ggplot(coefs, aes(value, group = type, colour = type)) +
+  geom_density() +
+  geom_vline(xintercept = 0) +
+  facet_wrap( ~ param, scales = "free")
+```
+
+
+\newpage
+## Other parameters
+
+```{r}
+beast.other = df.beast %>%
+  select(all_of(
+    c(
+      "likelihood",
+      "randomEffects.globalScale",
+      "alpha",
+      "log.kappa",
+      "treeModel.rootHeight"
+    )
+  )) %>%
+  rename(all_of(
+    c(globalScale = "randomEffects.globalScale", rootHeight = "treeModel.rootHeight")
+  )) %>%
+  mutate(type = "beast") %>%
+  gather("param", "value",-type)
+
+t.bb.other = df.t %>%
+  select(
+    like,
+    sitemodel.shape.0,
+    bayesian.bridge.scale.0,
+    substmodel.kappa.unres.0,
+    tree.root_height.0
+  ) %>%
+  rename(all_of(
+    c(
+      likelihood = "like",
+      globalScale = "bayesian.bridge.scale.0",
+      alpha = "sitemodel.shape.0",
+      log.kappa = "substmodel.kappa.unres.0",
+      rootHeight = "tree.root_height.0"
+    )
+  )) %>%
+  mutate(type = "torchtree") %>%
+  gather("param", "value",-type)
+
+other = rbind(beast.other, t.bb.other)
+```
+
+```{r}
+ggplot(other, aes(value, group = type, colour = type)) +
+  geom_density() +
+  facet_wrap( ~ param, scales = "free")
+```
+
+
+\newpage
+
+# Normalized rates
+
+```{r}
+lookup = setNames(
+  c("log.kappa", sapply(1:12, function(x) {
+    paste0("glmRandCoefficients", x)
+  })),
+  c("kappa", "AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG")
+)
+df.beast.rates = df.beast %>%
+  select(starts_with("glmRandCoefficients") | log.kappa) %>%
+  exp() %>%
+  rename(all_of(lookup)) %>%
+  # mutate(rateSum = select(., AC, AG, AT, CG, CT, GT, CA, GA, TA, GC, TC, TG) %>%
+  #     rowSums()) %>%
+  # mutate_at(
+  #     c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG"),
+  #     ~ . / rateSum
+  # ) %>%
+  mutate(
+    AC = AC * freqs[2], AG = AG * freqs[3] * kappa, AT = AT * freqs[4],
+    CG = CG * freqs[3], CT = CT * freqs[4] * kappa, GT = GT * freqs[4]
+  ) %>%
+  mutate(
+    CA = CA * freqs[1], GA = GA * freqs[1] * kappa, TA = TA * freqs[1],
+    GC = GC * freqs[2], TC = TC * freqs[2] * kappa, TG = TG * freqs[3]
+  ) %>%
+  mutate(norm = ((AC + AG + AT) * freqs[1] + (CA + CG + CT) * freqs[2] +
+    (GA + GC + GT) * freqs[3] + (TA + TC + TG) * freqs[4])) %>%
+  mutate_at(
+    c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG"),
+    ~ . / norm
+  ) %>%
+  select(-c(kappa, norm)) %>%
+  mutate(type = "HKY-RE-beast") %>%
+  gather("param", "value", -type)
+
+lookup = sapply(0:11, function(x) {
+  paste0("substmodel.kappa.", x)
+})
+names(lookup) = c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG")
+
+df.t.rates = df.t %>%
+  select(matches("substmodel.kappa.\\d+")) %>%
+  rename(all_of(lookup)) %>%
+  # mutate(rateSum = select(., AC, AG, AT, CG, CT, GT, CA, GA, TA, GC, TC, TG) %>%
+  #     rowSums()) %>%
+  # mutate_at(
+  #     c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG"),
+  #     ~ . / rateSum
+  # ) %>%
+  mutate(
+    AC = AC * freqs[2], AG = AG * freqs[3], AT = AT * freqs[4],
+    CG = CG * freqs[3], CT = CT * freqs[4], GT = GT * freqs[4]
+  ) %>%
+  mutate(
+    CA = CA * freqs[1], GA = GA * freqs[1], TA = TA * freqs[1],
+    GC = GC * freqs[2], TC = TC * freqs[2], TG = TG * freqs[3]
+  ) %>%
+  mutate(norm = ((AC + AG + AT) * freqs[1] + (CA + CG + CT) * freqs[2] +
+    (GA + GC + GT) * freqs[3] + (TA + TC + TG) * freqs[4])) %>%
+  mutate_at(
+    c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "TC", "TG"),
+    ~ . / norm
+  ) %>%
+  select(-norm) %>%
+  mutate(type = "HKY-RE") %>%
+  gather("param", "value", -type)
+
+df = rbind(df.t.gtr.rates, df.t.rates, df.beast.rates, df.beast.gtr.rates)
+```
+
+```{r}
+df$param <- factor(df$param,
+  levels = c("AC", "CA", "AG", "GA", "AT", "TA", "CG", "GC", "CT", "TC", "GT", "TG")
+)
+ggplot(df, aes(value, param, color = type)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_flip() +
+  scale_x_continuous(trans = "log2", breaks = c(0.01, 0.05, 0.2, 0.5, 2.0)) +
+  xlab("Normalized rate") +
+  ylab("Substitution type")
+```
+
+```{r nice-plot}
+temp = data.frame(
+  param = c("AC", "CA", "AG", "GA", "AT", "TA", "CG", "GC", "CT", "TC", "GT", "TG"),
+  index = c(1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6)
+)
+df = df %>% left_join(temp, by = join_by(param))
+ggplot(df, aes(value, param, color = type, fill = type)) +
+  theme_bw() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    strip.background = element_blank(),
+    strip.text.x = element_blank()
+  ) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) +
+  coord_flip() +
+  scale_x_continuous(trans = "log2",
+                     breaks = c(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0)) +
+  xlab("Normalized rate") +
+  ylab("Substitution type") +
+  # scale_colour_manual(values = c("#E69F00", "#009E73"), name = "") +
+  # scale_fill_manual(values = c("#E69F00", "#009E73"), name = "") +
+  facet_grid(. ~ index, drop = TRUE, scale = "free")
+```
+
+\newpage
+
+# Bayes factor
+
+Let $\phi = \tau^{-\alpha}$ and $\phi \sim Gamma(1, rate=0.5)$.
+Using the change of variable formula the pdf of $\tau$ is
+
+$$p(\tau) = p_\phi(\phi) |d\phi/d\tau| = p_\phi(\tau^{-\alpha}) |-\alpha \tau^{-\alpha-1}|$$
+
+The prior density at $\Delta_{ij} = \epsilon_{ji} - \epsilon_{ij}=0$ given $\tau$ is
+
+$$p(\Delta_{ij}=0|\tau) = \frac{\alpha}{2^{1+1/\alpha} \tau \Gamma(1/\alpha)}$$
+
+Integrating $\tau$ we get
+
+$$p(\Delta_{ij}=0) = \int_0^\infty p(\Delta_{ij}=0|\tau) p(\tau) d\tau.$$
+
+The Bayes Factor in favor of $\Delta_{ij} = 0$ (Model 0, against Model 1 where $\Delta_{ij}$ is a free parameter) is the ratio of the posterior density to the prior density at $\Delta_{ij} = 0$,
+
+$$BF_{01} = \frac{p(\Delta_{ij}=0 | y)}{p(\Delta_{ij}=0)} \approx \frac{q(\Delta_{ij}=0)}{p(\Delta_{ij}=0)},$$
+
+where $q$ is a normal distribution with mean $\mu_{ji}-\mu_{ij}$ and variance $\sigma_{ij}^2 + \sigma_{ji}^2$.
+$\mu_{ij}$ and $\sigma_{ij}$ are the mean and standard deviation of the normal variational approximation of $\epsilon_{ij}$.
+
+```{r}
+j = fromJSON(file.path(resultsdir, "torchtree", "HKY-RE", "skyglide", "ELBO", "checkpoint.json"))
+loc = j$tensor[[match("var.Normal.substmodel.kappa.random.loc", j$id)]]
+log_scale = j$tensor[[match("var.Normal.substmodel.kappa.random.scale.unres", j$id)]]
+scale = exp(log_scale)
+
+post0 = dnorm(0., loc[7:12] - loc[1:6], sd = sqrt(scale[1:6]**2 + scale[7:12]**2))
+
+alpha = 0.25
+prior.tau.0 <- function(tau) {
+  alpha / (2. ** (1. + 1. / alpha) * tau * gamma(1. / alpha)) *
+    dgamma(tau ** (-alpha), 1.0, rate = 0.5) * alpha * tau ** (-alpha - 1)
+}
+prior0 = integrate(prior.tau.0, lower = 0, upper = Inf)
+df = data.frame(
+  Substitution = c("A<->C", "A<->G", "A<->T", "C<->G", "C<->T", "G<->T"),
+  BF01 = post0 / prior0$value,
+  BF10 = prior0$value/post0,
+  logBF10 = log10(prior0$value/post0),
+  posterior = post0,
+  prior = prior0$value
+)
+kable(df)
+```
+
+```{r}
+coeffs = df.beast%>% select(starts_with("glmRandCoefficients"))
+locs = coeffs[, glmRandCoefficients1:glmRandCoefficients6] - coeffs[, glmRandCoefficients7:glmRandCoefficients12]
+beast.post0 = numeric(ncol(locs))
+for(i in 1:ncol(locs)){
+  values = locs[[paste0("glmRandCoefficients", i)]]
+  #d = density(values)
+  #beast.post0[i] = approx(d$x,d$y,xout=0.0)$y
+  beast.post0[i] = dnorm(0.0, mean(-values), sd(-values))
+}
+```
+
+```{r}
+temp = locs %>% gather("param", "value")
+ggplot(temp, aes(value, group = param)) +
+  geom_density() +
+  facet_wrap(~param, scales = "free")
+```
+
+```{r}
+df = data.frame(
+  Substitution = c("A<->C", "A<->G", "A<->T", "C<->G", "C<->T", "G<->T"),
+  BF01 = beast.post0 / prior0$value,
+  BF10 = prior0$value / beast.post0,
+  logBF10 = log10(prior0$value / beast.post0),
+  posterior = beast.post0,
+  prior = prior0$value
+)
+kable(df)
+```
+
+```{r}
+df = data.frame(
+  Substitution = c("A<->C", "A<->G", "A<->T", "C<->G", "C<->T", "G<->T"),
+  BEAST = log10(prior0$value / beast.post0),
+  torchtree = log10(prior0$value / post0)
+)
+kable(df)
+```
+
+```{r, eval=FALSE,include=FALSE}
+plot(seq(0, 1000000, 1), prior.tau.0(seq(0, 1000000, 1)))
+```

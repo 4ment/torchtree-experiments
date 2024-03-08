@@ -8070,7 +8070,7 @@
       "maximize": true,
       "checkpoint": "checkpoint.json",
       "checkpoint_all": true,
-      "iterations": 100000,
+      "iterations": 1000000,
       "loss": {
         "id": "elbo",
         "type": "ELBO",
@@ -8098,7 +8098,7 @@
       ],
       "convergence": {
         "type": "StanVariationalConvergence",
-        "max_iterations": 100000,
+        "max_iterations": 1000000,
         "loss": "elbo",
         "every": 100,
         "samples": 100,

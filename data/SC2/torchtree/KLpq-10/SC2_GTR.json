@@ -7967,14 +7967,16 @@
       "options": {
         "lr": 0.1
       },
-      "maximize": true,
+      "maximize": false,
       "checkpoint": "checkpoint.json",
       "checkpoint_all": true,
       "iterations": 1000000,
       "loss": {
         "id": "elbo",
-        "type": "ELBO",
-        "samples": 1,
+        "type": "KLpqImportance",
+        "samples": [
+          10
+        ],
         "joint": "joint.jacobian",
         "variational": "variational"
       },
@@ -7995,7 +7997,15 @@
       "convergence": {
         "type": "StanVariationalConvergence",
         "max_iterations": 1000000,
-        "loss": "elbo",
+        "loss": {
+          "id": "loss2",
+          "type": "KLpq",
+          "samples": [
+            10
+          ],
+          "joint": "joint.jacobian",
+          "variational": "variational"
+        },
         "every": 100,
         "samples": 100,
         "tol_rel_obj": 0.0000

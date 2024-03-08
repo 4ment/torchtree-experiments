@@ -4140,10 +4140,8 @@
 		</tmrcaStatistic>
 
 	<!-- Generate a gmrfSkyGridLikelihood for the Bayesian SkyGrid process       -->
-	<gmrfSkyGridLikelihood id="skygrid">
+	<!-- <gmrfSkyGridLikelihood id="skygrid">
 		<populationSizes>
-
-			<!-- skygrid.logPopSize is in log units unlike other popSize                 -->
 			<parameter id="skygrid.logPopSize" dimension="5" value="1.0"/>
 		</populationSizes>
 		<precisionParameter>
@@ -4158,7 +4156,38 @@
 		<populationTree>
 			<treeModel idref="treeModel"/>
 		</populationTree>
-	</gmrfSkyGridLikelihood>
+	</gmrfSkyGridLikelihood> -->
+
+    <skyGlideLikelihood id="skygrid">
+		<populationSizes>
+			<parameter id="skygrid.logPopSize" dimension="5" value="1.0"/>
+		</populationSizes>
+		<numGridPoints>
+			<parameter id="skygrid.numGridPoints" value="4"/>
+		</numGridPoints>
+		<cutOff>
+			<parameter id="skygrid.cutOff" value="0.3"/>
+		</cutOff>
+		<populationTree>
+			<treeModel idref="treeModel"/>
+		</populationTree>
+	</skyGlideLikelihood>
+
+    <randomField id="gmrf">
+		<distribution>
+			<gaussianMarkovRandomField dim="5" matchPseudoDeterminant="false"> <!-- false returns Mandev's calculation -->
+ 				<precision>
+					<parameter id="skygrid.precision" value="0.1" lower="0.0"/>
+				</precision>
+				<start>
+					<parameter id="mean" value="0.0"/>
+				</start>
+			</gaussianMarkovRandomField>
+		</distribution>
+		<data>
+			<parameter idref="skygrid.logPopSize"/>
+		</data>
+	</randomField>
 
 	<gammaPrior id="skygrid.precision.prior" shape="0.01" scale="100.0" offset="0.0">
 		<parameter idref="skygrid.precision"/>
@@ -4170,7 +4199,7 @@
 		<parameter idref="skygrid.logPopSize"/>
 	</compoundParameter>
 
-	<gmrfSkyrideGradient id="gmrfGradientPop" wrtParameter="logPopulationSizes" gradientCheckTolerance="0.1">
+	<!-- <gmrfSkyrideGradient id="gmrfGradientPop" wrtParameter="logPopulationSizes" gradientCheckTolerance="0.1">
 		<gmrfSkyGridLikelihood idref="skygrid"/>
 	</gmrfSkyrideGradient>
 
@@ -4189,7 +4218,7 @@
 	<compoundGradient id="full.skygrid.gradient">
 		<jointGradient idref="joint.skygrid.precision"/>
 		<gmrfSkyrideGradient idref="gmrfGradientPop"/>
-	</compoundGradient>
+	</compoundGradient> -->
 
 	<!-- A constant-rate clock written as a UCLD with 0 variance. -->
 	<arbitraryBranchRates id="branchRates" reciprocal="false" exp="false" centerAtOne="false">
@@ -4269,59 +4298,25 @@
 	</rateStatistic>
 
 
-	<!-- The random effects model (HKY+RE)-->
-    <glmSubstitutionModel id="hky" dataType="nucleotide">
-        <rootFrequencies>
-					<frequencyModel dataType="nucleotide">
-						<alignment idref="alignment"/>
-						<frequencies>
-							<parameter id="frequencies" dimension="4"/>
-						</frequencies>
-					</frequencyModel>
-        </rootFrequencies>
-
-        <glmModel family="logLinear" checkIdentifiability="true">
-            <independentVariables>
-                <parameter id="log.kappa" value="1.5"/>
-                <designMatrix id="hky.designMatrix">
-                    <parameter id="kappa.design" value="0 1 0 0 1 0	0 1 0 0 1 0"/>
-                </designMatrix>
-            </independentVariables>
-            <randomEffects>
-                <parameter id="glmRandCoefficients" dimension="12" value="0.0"/>
-            </randomEffects>
-        </glmModel>
-    </glmSubstitutionModel>
-
-    <bayesianBridge id="randomEffects.prior">
-        <parameter idref="glmRandCoefficients"/>
-        <globalScale>
-            <parameter id="randomEffects.globalScale" value="1E-3"/>
-        </globalScale>
-<!-- 
-        <localScale>
-            <parameter id="randomEffects.localScale" value="1.0" dimension="12"/> <!~~ keep these fixed for Normal ~~>
-        </localScale>
- -->
-        <exponent>
-            <parameter value="0.25"/>
-        </exponent>
-<!-- 
-		<slabWidth>
-			<parameter value="2.0"/>
-		</slabWidth>
- -->
-    </bayesianBridge>
-
-	<gammaPrior id="globalScalePrior" shape="1" scale="2">
-		<parameter idref="randomEffects.globalScale"/>
-	</gammaPrior>
-
+	<!-- The general time reversible (GTR) substitution model                    -->
+	<gtrModel id="gtr">
+		<frequencies>
+			<frequencyModel dataType="nucleotide">
+				<alignment idref="alignment"/>
+				<frequencies>
+					<parameter id="frequencies" dimension="4"/>
+				</frequencies>
+			</frequencyModel>
+		</frequencies>
+		<rates>
+			<parameter id="gtr.rates" dimension="6" value="1.0" lower="0.0"/>
+		</rates>
+	</gtrModel>
 
 	<!-- site model                                                              -->
 	<siteModel id="siteModel">
 		<substitutionModel>
-			<HKYModel idref="hky"/>
+			<GTRModel idref="gtr"/>
 		</substitutionModel>
 		<gammaShape gammaCategories="4">
 			<parameter id="alpha" value="0.5" lower="0.0"/>
@@ -4343,16 +4338,10 @@
 		<treeModel idref="treeModel"/>
 		<strictClockBranchRates idref="branchRates"/>
 	</treeDataLikelihood>
-
-	<!-- Gradient for GLM (HKY+RE) -->
-	<glmSubstitutionModelGradient id="randomEffects.gradient" traitName="Sequence" effects="random">
-		<treeDataLikelihood idref="treeLikelihood"/>
-		<glmSubstitutionModel idref="hky"/>
-	</glmSubstitutionModelGradient>
 	
 	<!-- gradients for rates and dates HMC -->
 
-	<gmrfSkyrideGradient id="skyrideGradientWrtNodeHeight" wrtParameter="nodeHeight" gradientCheckTolerance="0.1">
+	<!-- <gmrfSkyrideGradient id="skyrideGradientWrtNodeHeight" wrtParameter="nodeHeight" gradientCheckTolerance="0.1">
 		<gmrfSkyrideLikelihood idref="skygrid"/>
 	</gmrfSkyrideGradient>
 
@@ -4410,33 +4399,30 @@
 
 	<nodeHeightProxyParameter id="nodeHeightProxyParameter" rootNode="true">
 		<tree idref="treeModel"/>
-	</nodeHeightProxyParameter>
+	</nodeHeightProxyParameter> -->
 
 	<!-- Define operators                                                        -->
 	<operators id="operators" optimizationSchedule="default">
-		<bayesianBridgeGibbsOperator weight="1">
-			<bayesianBridge idref="randomEffects.prior"/>
-			<gammaPrior idref="globalScalePrior"/>
-		</bayesianBridgeGibbsOperator>
-		<randomWalkOperator windowSize="0.1" weight="3">
-			<parameter idref="log.kappa"/>
-		</randomWalkOperator>
 
-		<randomWalkOperator windowSize="0.0075" weight="0.5">
-			<parameter idref="glmRandCoefficients"/>
-		</randomWalkOperator>
+		<deltaExchange delta="0.01" weight="0.5">
+			<parameter idref="gtr.rates"/>
+		</deltaExchange>
+
+        <scaleOperator scaleFactor="0.75" scaleAll="true" ignoreBounds="true" weight="3">
+			<parameter idref="treeModel.allInternalNodeHeights"/>
+		</scaleOperator>
 
 		<!-- HMC on node ages -->
-		<hamiltonianMonteCarloOperator weight="3.0" nSteps="4" stepSize="1E-3" mode="vanilla" instabilityHandler="reject"
+		<!-- <hamiltonianMonteCarloOperator weight="3.0" nSteps="4" stepSize="1E-3" mode="vanilla" instabilityHandler="reject"
 										 drawVariance="1.0" autoOptimize="true" targetAcceptanceProbability="0.2"
 										 preconditioning="adaptiveDiagonal" preconditioningDelay="200" preconditioningUpdateFrequency="10">
 				<jointGradient idref="jointNodeHeightGradient"/>
 				<nodeHeightProxyParameter idref="nodeHeightProxyParameter"/>
 				<nodeHeightTransform idref="fullRatioRealLineTransform"/>
-		</hamiltonianMonteCarloOperator>
+		</hamiltonianMonteCarloOperator> -->
 
 		<!-- HMC on skygrid -->
-		<hamiltonianMonteCarloOperator weight="1.0" nSteps="50" stepSize="1E-2"
+		<!-- <hamiltonianMonteCarloOperator weight="1.0" nSteps="50" stepSize="1E-2"
 																		mode="vanilla" autoOptimize="true"
 																		gradientCheckCount="10000"
 																		gradientCheckTolerance="1E-1"
@@ -4447,7 +4433,18 @@
 				<signTransform start="1" end="1">
 						<compoundParameter idref="skygrid.parameters"/>
 				</signTransform>
- 		</hamiltonianMonteCarloOperator>
+ 		</hamiltonianMonteCarloOperator> -->
+
+        <!-- MCMC on skyglide -->
+        <adaptableVarianceMultivariateNormalOperator scaleFactor="1.0" weight="5" initial="5000"
+            burnin="2500" beta="0.05" coefficient="1.0" autoOptimize="true" formXtXInverse="false">
+			<transform type="none">
+				<parameter idref="skygrid.logPopSize"/>
+			</transform>
+		</adaptableVarianceMultivariateNormalOperator>
+		<scaleOperator scaleFactor="0.1" weight="2">
+			<parameter idref="skygrid.precision"/>
+		</scaleOperator>
 
 		<scaleOperator scaleFactor="0.75" weight="0.5">
 			<parameter idref="alpha"/>
@@ -4473,28 +4470,28 @@
 		<uniformOperator weight="3">
 			<parameter idref="treeModel.internalNodeHeights"/>
 		</uniformOperator>
-		<gmrfGridBlockUpdateOperator scaleFactor="1.0" weight="0.2">
+		<!-- <gmrfGridBlockUpdateOperator scaleFactor="1.0" weight="0.2">
 			<gmrfSkyrideLikelihood idref="skygrid"/>
 		</gmrfGridBlockUpdateOperator>
 		<scaleOperator scaleFactor="0.75" weight="0.1">
 			<parameter idref="skygrid.precision"/>
-		</scaleOperator>
+		</scaleOperator> -->
 	</operators>
 
 	<!-- Define MCMC             400000000                                         -->
 	<mcmc id="mcmc" chainLength="50000000" autoOptimize="true" operatorAnalysis="SC2.ops">
 		<joint id="joint">
 			<prior id="prior">
-				<bayesianBridge idref="randomEffects.prior"/>
-				<normalPrior mean="0" stdev="1.25">
-					<parameter idref="log.kappa"/>
-				</normalPrior>
+				<dirichletPrior alpha="1.0" sumsTo="6.0">
+					<parameter idref="gtr.rates"/>
+				</dirichletPrior>
 				<exponentialPrior mean="0.5" offset="0.0">
 					<parameter idref="alpha"/>
 				</exponentialPrior>
 				<strictClockBranchRates idref="branchRates"/>
 				<gammaPrior idref="skygrid.precision.prior"/>
-				<gmrfSkyGridLikelihood idref="skygrid"/>
+				<skyGlideLikelihood idref="skygrid"/>
+				<randomField idref="gmrf"/>
 				
 				<distributionLikelihood idref="clock.location.prior"/>
 				<distributionLikelihood idref="clock.scale.prior"/>
@@ -4526,18 +4523,15 @@
 		</log>
 
 		<!-- write log to file                                                       -->
-		<log id="fileLog" logEvery="500" fileName="SC2_MH.log" overwrite="false">
+		<log id="fileLog" logEvery="500" fileName="SC2_GTR.log" overwrite="false">
 			<joint idref="joint"/>
 			<prior idref="prior"/>
 			<likelihood idref="likelihood"/>
 			<parameter idref="treeModel.rootHeight"/>
 			<tmrcaStatistic idref="age(root)"/>
 			<treeLengthStatistic idref="treeLength"/>
-			<parameter idref="log.kappa"/>
-			<parameter idref="glmRandCoefficients"/>
+			<parameter idref="gtr.rates"/>
 			<parameter idref="frequencies"/>
-			<parameter idref="randomEffects.globalScale"/>
-<!-- 			<parameter idref="randomEffects.localScale"/> -->
 			<parameter idref="alpha"/>
 			<parameter idref="clock.location"/>
 			<parameter idref="clock.scale"/>
@@ -4547,11 +4541,11 @@
 			<strictClockBranchRates idref="branchRates"/>
 			<parameter idref="skygrid.precision"/>
 			<parameter idref="skygrid.logPopSize"/>
-			<parameter idref="skygrid.cutOff"/>
-			<gmrfSkyGridLikelihood idref="skygrid"/>
+			<parameter idref="skygrid.cutOff"/>	
+			<skyGlideLikelihood idref="skygrid"/>
 		</log>
 		<!-- write tree log to file                                                  -->
-		<logTree id="treeFileLog" logEvery="50000" nexusFormat="true" fileName="SC2_MH.trees" sortTranslationTable="true">
+		<logTree id="treeFileLog" logEvery="50000" nexusFormat="true" fileName="SC2_GTR.trees" sortTranslationTable="true">
 			<treeModel idref="treeModel"/>
 			<trait name="rate" tag="rate">
 				<strictClockBranchRates idref="branchRates"/>

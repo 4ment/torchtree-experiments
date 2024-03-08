@@ -7095,19 +7095,41 @@
           },
           "substitution_model": {
             "id": "substmodel",
-            "type": "GTR",
-            "rates": {
-              "id": "substmodel.rates",
-              "type": "TransformedParameter",
-              "simplex": true,
-              "transform": "torch.distributions.StickBreakingTransform",
-              "x": {
-                "id": "substmodel.rates.unres",
+            "type": "GeneralNonSymmetricSubstitutionModel",
+            "data_type": {
+                "id": "data_type2",
+                "type": "NucleotideDataType"
+            },
+            "mapping":{
+                "id": "mapping",
                 "type": "Parameter",
-                "tensor": 0.0,
-                "full": [
-                  5
-                ]
+                "arange": 12
+            },
+            "rates": {
+              "id": "substmodel.kappa",
+              "type": "TransformedParameter",
+              "lower": 0.0,
+              "transform": "torch.distributions.ExpTransform",
+              "x": {
+                "id": "linear",
+                "type": "TransformedParameter",
+                "transform": "torchtree.distributions.transforms.LinearTransform",
+                "x":{
+                  "id": "substmodel.kappa.unres",
+                  "type": "Parameter",
+                  "tensor": [[
+                    1.0986122886681098]
+                  ]
+                },
+                "parameters":{
+                    "weight": [[0.0], [1.0], [0.0], [0.0], [1.0], [0.0], [0.0], [1.0], [0.0], [0.0], [1.0], [0.0]],
+                    "bias":{
+                      "id": "substmodel.kappa.random",
+                      "type": "Parameter",
+                      "full": [12],
+                      "tensor": 0.0
+                    }
+                }
               }
             },
             "frequencies": {
@@ -7176,28 +7198,56 @@
               }
             },
             {
-              "id": "substmodel.rates.prior",
-              "type": "Distribution",
-              "distribution": "torch.distributions.Dirichlet",
-              "x": "substmodel.rates",
-              "parameters": {
-                "concentration": [
-                  1.0,
-                  1.0,
-                  1.0,
-                  1.0,
-                  1.0,
-                  1.0
-                ]
-              }
-            },
-            {
               "id": "sitemodel.shape.prior",
               "type": "Distribution",
               "distribution": "torch.distributions.Exponential",
               "x": "sitemodel.shape",
               "parameters": {
                 "rate": 2.0
+              }
+            },
+            {
+              "id": "substmodel.random.prior",
+              "type": "BayesianBridge",
+              "x": "substmodel.kappa.random",
+              "alpha": 0.25,
+              "scale": {
+                  "id": "bayesian.bridge.scale",
+                  "type": "TransformedParameter",
+                  "transform": "torch.distributions.PowerTransform",
+                  "x": {
+                    "id": "bayesian.bridge.phi",
+                    "type": "TransformedParameter",
+                    "transform": "torch.distributions.ExpTransform",
+                    "x":{
+                      "id": "bayesian.bridge.phi.unres",
+                      "type": "Parameter",
+                      "tensor": [0.001]
+                    }
+                  },
+                     "parameters":{
+                    "exponent": -4.0
+                  }
+              }
+            },
+            {
+              "id": "bayesian.bridge.phi.prior",
+              "type": "Distribution",
+              "distribution": "torch.distributions.Gamma",
+              "x": "bayesian.bridge.phi",
+              "parameters": {
+                "concentration": 1.0,
+                "rate": 0.5
+              }
+            },
+            {
+              "id": "substmodel.kappa.unres.prior",
+              "type": "Distribution",
+              "distribution": "torch.distributions.Normal",
+              "x": "substmodel.kappa.unres",
+              "parameters": {
+                "loc": 0.0,
+                "scale": 1.25
               }
             }
           ]
@@ -7212,7 +7262,7 @@
         "tree.ratios",
         "tree.root_height.unshifted",
         "sitemodel.shape",
-        "substmodel.rates",
+        "bayesian.bridge.phi",
         "gmrf.precision",
         "tree"
       ]
@@ -7855,24 +7905,24 @@
           }
         },
         {
-          "id": "variational.sitemodel.shape",
+          "id": "var.Normal.sitemodel.shape",
           "type": "Distribution",
           "distribution": "torch.distributions.Normal",
           "x": "sitemodel.shape.unres",
           "parameters": {
             "loc": {
-              "id": "variational.sitemodel.shape.unres.loc",
+              "id": "var.Normal.sitemodel.shape.unres.loc",
               "type": "Parameter",
               "tensor": [
                 -2.3502401828962083
               ]
             },
             "scale": {
-              "id": "variational.sitemodel.shape.unres.scale",
+              "id": "var.Normal.sitemodel.shape.unres.scale",
               "type": "TransformedParameter",
               "transform": "torch.distributions.ExpTransform",
               "x": {
-                "id": "variational.sitemodel.shape.unres.scale.unres",
+                "id": "var.Normal.sitemodel.shape.unres.scale.unres",
                 "type": "Parameter",
                 "tensor": [
                   -1.1753093277566469
@@ -7882,25 +7932,75 @@
           }
         },
         {
-          "id": "variational.substmodel.rates",
+          "id": "var.Normal.substmodel.kappa",
           "type": "Distribution",
           "distribution": "torch.distributions.Normal",
-          "x": "substmodel.rates.unres",
+          "x": "substmodel.kappa.unres",
           "parameters": {
             "loc": {
-              "id": "variational.substmodel.rates.unres.loc",
+              "id": "var.Normal.substmodel.kappa.unres.loc",
               "type": "Parameter",
-              "full_like": "substmodel.rates.unres",
-              "tensor": 0.5
+              "tensor": [
+                1.0985567361987452
+              ]
             },
             "scale": {
-              "id": "variational.substmodel.rates.unres.scale",
+              "id": "var.Normal.substmodel.kappa.unres.scale",
               "type": "TransformedParameter",
               "transform": "torch.distributions.ExpTransform",
               "x": {
-                "id": "variational.substmodel.rates.unres.scale.unres",
+                "id": "var.Normal.substmodel.kappa.unres.scale.unres",
                 "type": "Parameter",
-                "full_like": "substmodel.rates.unres",
+                "tensor": [
+                  -4.5525177046507554
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "var.Normal.substmodel.kappa.random",
+          "type": "Distribution",
+          "distribution": "torch.distributions.Normal",
+          "x": "substmodel.kappa.random",
+          "parameters": {
+            "loc": {
+              "id": "var.Normal.substmodel.kappa.random.loc",
+              "type": "Parameter",
+                "full_like": "substmodel.kappa.random",
+                "tensor": 0.0
+            },
+            "scale": {
+              "id": "var.Normal.substmodel.kappa.random.scale",
+              "type": "TransformedParameter",
+              "transform": "torch.distributions.ExpTransform",
+              "x": {
+                "id": "var.Normal.substmodel.kappa.random.scale.unres",
+                "type": "Parameter",
+                "full_like": "substmodel.kappa.random",              
+                "tensor": -4.5525177046507554
+              }
+            }
+          }
+        },
+        {
+          "id": "var.Normal.bayesian.bridge.phi",
+          "type": "Distribution",
+          "distribution": "torch.distributions.Normal",
+          "x": "bayesian.bridge.phi.unres",
+          "parameters": {
+            "loc": {
+              "id": "var.Normal.bayesian.bridge.phi.loc",
+              "type": "Parameter",
+              "tensor": [0.5]
+            },
+            "scale": {
+              "id": "var.Normal.bayesian.bridge.phi.unres.scale",
+              "type": "TransformedParameter",
+              "transform": "torch.distributions.ExpTransform",
+              "x": {
+                "id": "var.Normal.bayesian.bridge.phi.unres.scale.unres",
+                "type": "Parameter",
                 "tensor": -1.89712
               }
             }
@@ -7957,7 +8057,7 @@
               }
             }
           }
-        }
+        }      
       ]
     },
     {
@@ -7967,14 +8067,16 @@
       "options": {
         "lr": 0.1
       },
-      "maximize": true,
+      "maximize": false,
       "checkpoint": "checkpoint.json",
       "checkpoint_all": true,
       "iterations": 1000000,
       "loss": {
         "id": "elbo",
-        "type": "ELBO",
-        "samples": 1,
+        "type": "KLpqImportance",
+        "samples": [
+          10
+        ],
         "joint": "joint.jacobian",
         "variational": "variational"
       },
@@ -7983,10 +8085,14 @@
         "variational.tree.ratios.unres.scale.unres",
         "variational.tree.root_height.unshifted.unres.loc",
         "variational.tree.root_height.unshifted.unres.scale.unres",
-        "variational.sitemodel.shape.unres.loc",
-        "variational.sitemodel.shape.unres.scale.unres",
-        "variational.substmodel.rates.unres.loc",
-        "variational.substmodel.rates.unres.scale.unres",
+        "var.Normal.sitemodel.shape.unres.loc",
+        "var.Normal.sitemodel.shape.unres.scale.unres",
+        "var.Normal.substmodel.kappa.unres.loc",
+        "var.Normal.substmodel.kappa.unres.scale.unres",
+        "var.Normal.substmodel.kappa.random.loc",
+        "var.Normal.substmodel.kappa.random.scale.unres",
+        "var.Normal.bayesian.bridge.phi.loc",
+        "var.Normal.bayesian.bridge.phi.unres.scale.unres",
         "variational.coalescent.theta.log.loc",
         "variational.coalescent.theta.log.scale.unres",
         "variational.gmrf.precision.unres.loc",
@@ -7995,10 +8101,18 @@
       "convergence": {
         "type": "StanVariationalConvergence",
         "max_iterations": 1000000,
-        "loss": "elbo",
+        "loss": {
+          "id": "loss2",
+          "type": "KLpq",
+          "samples": [
+            10
+          ],
+          "joint": "joint.jacobian",
+          "variational": "variational"
+        },
         "every": 100,
         "samples": 100,
-        "tol_rel_obj": 0.0000
+        "tol_rel_obj": 0.00001
       },
       "scheduler": {
         "type": "torchtree.optim.Scheduler",
@@ -8027,8 +8141,11 @@
             "branchmodel.rate",
             "coalescent.theta",
             "gmrf.precision",
-            "substmodel.rates",
-            "sitemodel.shape"
+            "substmodel.kappa.unres",
+            "substmodel.kappa",
+            "substmodel.kappa.random",
+            "sitemodel.shape",
+            "bayesian.bridge.scale"
           ],
           "delimiter": "\t"
         },

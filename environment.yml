@@ -1,0 +1,11 @@
+name: torchtree
+channels:
+  - bioconda
+  - pytorch
+dependencies:
+  - click
+  - iqtree=2.2.6
+  - lsd=2.2.3
+  - nextflow
+  - pandas
+  - pytorch>=1.9

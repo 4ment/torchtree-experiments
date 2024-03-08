@@ -26,12 +26,56 @@ def read_fasta(alignment):
 @click.option("--file", type=click.File("r"), required=True, help="input json file")
 @click.option("--output", type=click.File("w"), required=True, help="output json file")
 @click.option("--alignment", type=click.File("r"), required=True, help="fasta file")
-def torchtree(file, output, alignment):
+@click.option(
+    "--engine",
+    type=click.Choice(["torchtree", "physher"]),
+    default="torchtree",
+    help="engine",
+)
+def torchtree(file, output, alignment, engine):
     sequences = read_fasta(alignment)
     data = json.load(file)
     for sequence in data[1]["sequences"]:
         sequence["sequence"] = sequences[sequence["taxon"]]
+
+    if engine == "physher":
+        like = findInDictByID(data, "like")
+        like["type"] = "torchtree_physher." + like["type"]
+        like["tree_model"]["type"] = "torchtree_physher." + like["tree_model"]["type"]
+        like["branch_model"]["type"] = (
+            "torchtree_physher." + like["branch_model"]["type"]
+        )
+        like["site_model"]["type"] = (
+            "torchtree_physher." + like["site_model"]["type"].split(".")[-1]
+        )
+        like["substitution_model"]["type"] = (
+            "torchtree_physher." + like["substitution_model"]["type"]
+        )
+        # GTR does specify data_type
+        if "data_type" in like["substitution_model"]:
+            like["substitution_model"]["data_type"]["type"] = (
+                "torchtree_physher." + like["substitution_model"]["data_type"]["type"]
+            )
+
+        coalescent = findInDictByID(data, "coalescent")
+        coalescent["type"] = "torchtree_physher." + coalescent["type"]
+
     json.dump(data, output, indent=2)
+
+
+def findInDictByID(obj, id_, res=None):
+    if res is not None:
+        return res
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)):
+                res = findInDictByID(v, id_, res)
+            elif k == "id" and v == id_:
+                res = obj
+    elif isinstance(obj, list):
+        for item in obj:
+            res = findInDictByID(item, id_, res)
+    return res
 
 
 @click.command(help="Generate XML file with alignment file")

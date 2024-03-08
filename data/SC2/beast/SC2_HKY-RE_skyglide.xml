@@ -4140,10 +4140,8 @@
 		</tmrcaStatistic>
 
 	<!-- Generate a gmrfSkyGridLikelihood for the Bayesian SkyGrid process       -->
-	<gmrfSkyGridLikelihood id="skygrid">
+	<!-- <gmrfSkyGridLikelihood id="skygrid">
 		<populationSizes>
-
-			<!-- skygrid.logPopSize is in log units unlike other popSize                 -->
 			<parameter id="skygrid.logPopSize" dimension="5" value="1.0"/>
 		</populationSizes>
 		<precisionParameter>
@@ -4158,19 +4156,49 @@
 		<populationTree>
 			<treeModel idref="treeModel"/>
 		</populationTree>
-	</gmrfSkyGridLikelihood>
+	</gmrfSkyGridLikelihood> -->
+
+    <skyGlideLikelihood id="skygrid">
+		<populationSizes>
+			<parameter id="skygrid.logPopSize" dimension="5" value="1.0"/>
+		</populationSizes>
+		<numGridPoints>
+			<parameter id="skygrid.numGridPoints" value="4"/>
+		</numGridPoints>
+		<cutOff>
+			<parameter id="skygrid.cutOff" value="0.3"/>
+		</cutOff>
+		<populationTree>
+			<treeModel idref="treeModel"/>
+		</populationTree>
+	</skyGlideLikelihood>
+
+    <randomField id="gmrf">
+		<distribution>
+			<gaussianMarkovRandomField dim="5" matchPseudoDeterminant="false"> <!-- false returns Mandev's calculation -->
+ 				<precision>
+					<parameter id="skygrid.precision" value="0.1" lower="0.0"/>
+				</precision>
+				<start>
+					<parameter id="mean" value="0.0"/>
+				</start>
+			</gaussianMarkovRandomField>
+		</distribution>
+		<data>
+			<parameter idref="skygrid.logPopSize"/>
+		</data>
+	</randomField>
 
 	<gammaPrior id="skygrid.precision.prior" shape="0.01" scale="100.0" offset="0.0">
 		<parameter idref="skygrid.precision"/>
 	</gammaPrior>
-
 	
 	<compoundParameter id="skygrid.parameters">
 		<parameter idref="skygrid.precision"/>
 		<parameter idref="skygrid.logPopSize"/>
 	</compoundParameter>
 
-	<gmrfSkyrideGradient id="gmrfGradientPop" wrtParameter="logPopulationSizes" gradientCheckTolerance="0.1">
+	<!-- <gmrfSkyrideGradient id="gmrfGradientPop" wrtParameter="logPopulationSizes" gradientCheckTolerance="0.1">
 		<gmrfSkyGridLikelihood idref="skygrid"/>
 	</gmrfSkyrideGradient>
 
@@ -4189,7 +4217,7 @@
 	<compoundGradient id="full.skygrid.gradient">
 		<jointGradient idref="joint.skygrid.precision"/>
 		<gmrfSkyrideGradient idref="gmrfGradientPop"/>
-	</compoundGradient>
+	</compoundGradient> -->
 
 	<!-- A constant-rate clock written as a UCLD with 0 variance. -->
 	<arbitraryBranchRates id="branchRates" reciprocal="false" exp="false" centerAtOne="false">
@@ -4352,7 +4380,7 @@
 	
 	<!-- gradients for rates and dates HMC -->
 
-	<gmrfSkyrideGradient id="skyrideGradientWrtNodeHeight" wrtParameter="nodeHeight" gradientCheckTolerance="0.1">
+	<!-- <gmrfSkyrideGradient id="skyrideGradientWrtNodeHeight" wrtParameter="nodeHeight" gradientCheckTolerance="0.1">
 		<gmrfSkyrideLikelihood idref="skygrid"/>
 	</gmrfSkyrideGradient>
 
@@ -4410,7 +4438,7 @@
 
 	<nodeHeightProxyParameter id="nodeHeightProxyParameter" rootNode="true">
 		<tree idref="treeModel"/>
-	</nodeHeightProxyParameter>
+	</nodeHeightProxyParameter> -->
 
 	<!-- Define operators                                                        -->
 	<operators id="operators" optimizationSchedule="default">
@@ -4426,17 +4454,21 @@
 			<parameter idref="glmRandCoefficients"/>
 		</randomWalkOperator>
 
+        <scaleOperator scaleFactor="0.75" scaleAll="true" ignoreBounds="true" weight="3">
+			<parameter idref="treeModel.allInternalNodeHeights"/>
+		</scaleOperator>
+
 		<!-- HMC on node ages -->
-		<hamiltonianMonteCarloOperator weight="3.0" nSteps="4" stepSize="1E-3" mode="vanilla" instabilityHandler="reject"
+		<!-- <hamiltonianMonteCarloOperator weight="3.0" nSteps="4" stepSize="1E-3" mode="vanilla" instabilityHandler="reject"
 										 drawVariance="1.0" autoOptimize="true" targetAcceptanceProbability="0.2"
 										 preconditioning="adaptiveDiagonal" preconditioningDelay="200" preconditioningUpdateFrequency="10">
 				<jointGradient idref="jointNodeHeightGradient"/>
 				<nodeHeightProxyParameter idref="nodeHeightProxyParameter"/>
 				<nodeHeightTransform idref="fullRatioRealLineTransform"/>
-		</hamiltonianMonteCarloOperator>
+		</hamiltonianMonteCarloOperator> -->
 
 		<!-- HMC on skygrid -->
-		<hamiltonianMonteCarloOperator weight="1.0" nSteps="50" stepSize="1E-2"
+		<!-- <hamiltonianMonteCarloOperator weight="1.0" nSteps="50" stepSize="1E-2"
 																		mode="vanilla" autoOptimize="true"
 																		gradientCheckCount="10000"
 																		gradientCheckTolerance="1E-1"
@@ -4447,7 +4479,7 @@
 				<signTransform start="1" end="1">
 						<compoundParameter idref="skygrid.parameters"/>
 				</signTransform>
- 		</hamiltonianMonteCarloOperator>
+ 		</hamiltonianMonteCarloOperator> -->
 
 		<scaleOperator scaleFactor="0.75" weight="0.5">
 			<parameter idref="alpha"/>
@@ -4473,9 +4505,12 @@
 		<uniformOperator weight="3">
 			<parameter idref="treeModel.internalNodeHeights"/>
 		</uniformOperator>
-		<gmrfGridBlockUpdateOperator scaleFactor="1.0" weight="0.2">
-			<gmrfSkyrideLikelihood idref="skygrid"/>
-		</gmrfGridBlockUpdateOperator>
+		<adaptableVarianceMultivariateNormalOperator scaleFactor="1.0" weight="5" initial="5000"
+            burnin="2500" beta="0.05" coefficient="1.0" autoOptimize="true" formXtXInverse="false">
+			<transform type="none">
+				<parameter idref="skygrid.logPopSize"/>
+			</transform>
+		</adaptableVarianceMultivariateNormalOperator>
 		<scaleOperator scaleFactor="0.75" weight="0.1">
 			<parameter idref="skygrid.precision"/>
 		</scaleOperator>
@@ -4494,7 +4529,8 @@
 				</exponentialPrior>
 				<strictClockBranchRates idref="branchRates"/>
 				<gammaPrior idref="skygrid.precision.prior"/>
-				<gmrfSkyGridLikelihood idref="skygrid"/>
+				<skyGlideLikelihood idref="skygrid"/>
+				<randomField idref="gmrf"/>
 				
 				<distributionLikelihood idref="clock.location.prior"/>
 				<distributionLikelihood idref="clock.scale.prior"/>
@@ -4548,7 +4584,7 @@
 			<parameter idref="skygrid.precision"/>
 			<parameter idref="skygrid.logPopSize"/>
 			<parameter idref="skygrid.cutOff"/>
-			<gmrfSkyGridLikelihood idref="skygrid"/>
+			<skyGlideLikelihood idref="skygrid"/>
 		</log>
 		<!-- write tree log to file                                                  -->
 		<logTree id="treeFileLog" logEvery="50000" nexusFormat="true" fileName="SC2_MH.trees" sortTranslationTable="true">

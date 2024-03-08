@@ -23,7 +23,7 @@ def create_arguments(coalescent, divergence, engine){
   if (engine == "physher" | engine == "bito")
     args += " --${engine}"
   
-  if (engine == "physher" & coalescent == "piecewise-linear"){
+  if (engine == "physher" & coalescent == "skyglide"){
     args += " --physher_disable_coalescent"
   }
   
@@ -45,13 +45,13 @@ def create_arguments(coalescent, divergence, engine){
 }
 
 process RUN_TORCHTREE_HCV {
-  publishDir "${results}/${coalescent}/${divergence}/${engine}/", mode: 'copy'
+  publishDir "${results}/torchtree/${coalescent}/${divergence}/${engine}/", mode: 'copy'
 
   input:
     tuple val(coalescent), val(divergence), val(engine)
   output:
     path("torchtree.json")
-    path("checkpoint*")
+    path("checkpoints.tar.gz")
     path("samples.csv")
     path("samples.trees")
     path("torchtree.log")
@@ -68,11 +68,12 @@ process RUN_TORCHTREE_HCV {
   					 > torchtree.json
   { time \
     torchtree -s 1 torchtree.json  > torchtree.txt ; } 2> torchtree.log
+  tar -czf checkpoints.tar.gz checkpoint-*
   """
 }
 
 process RUN_TORCHTREE_HMC {
-  publishDir "${results}/${coalescent}/hmc/${engine}/", mode: 'copy'
+  publishDir "${results}/torchtree/${coalescent}/hmc/${engine}/", mode: 'copy'
   errorStrategy 'ignore'
 
   input:
@@ -102,7 +103,7 @@ process RUN_TORCHTREE_HMC {
 }
 
 process RUN_TORCHTREE_MCMC {
-  publishDir "${results}/${coalescent}/mcmc/${engine}/", mode: 'copy'
+  publishDir "${results}/torchtree/${coalescent}/mcmc/${engine}/", mode: 'copy'
 
   input:
     tuple val(susbtmodel), val(categories), val(sitemodel), val(coalescent), val(integrated), val(engine), val(root)
@@ -127,10 +128,24 @@ process RUN_TORCHTREE_MCMC {
   """
 }
 
+process RUN_BEAST_HCV {
+  publishDir "${results}/beast/${model}/", mode: 'copy'
 
+  input:
+    val(model)
+  output:
+    path("*.log")
+    path("*.trees")
+    path("*.ops")
+    path("beast.txt")
+  """
+  { time \
+    beast ${projectDir}/data/HCV/beast/HCV_${model}.xml  > beast.txt ; } 2> beast.log
+  """
+}
 
-workflow {
-  coalescent = Channel.from("skygrid", "piecewise-linear")
+workflow HCV {
+  coalescent = Channel.from("skygrid", "skyglide")
   divergence = Channel.from("ELBO", "KLpq-10")
   engines = Channel.from("physher")
 
@@ -141,4 +156,6 @@ workflow {
   RUN_TORCHTREE_HMC(ch_hmc)
 
   RUN_TORCHTREE_MCMC(ch_hmc)
+
+  coalescent | RUN_BEAST_HCV
 }
