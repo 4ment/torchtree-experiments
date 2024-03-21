@@ -18,14 +18,38 @@ To execute this pipeline, it is necessary to install [nextflow](https://www.next
 ## Installation
 
     git clone 4ment/torchtree-experiments.git
+    cd torchtree-experiments/
+    chmod +x bin/*.py
 
-## Running the pipeline with docker
+## Pipeline without docker/singularity
 
-    nextflow run main.nf -profile docker --sc2 sc2.fa
+### Installing dependencies with conda
+    conda env create -f environment.yml
+    git clone http://github.com/4ment/torchtree.git
+    pip install torchtree/
+    git clone http://github.com/4ment/torchtree-physher.git
+    pip install torchtree-physher/
+    git clone http://github.com/4ment/torchtree-scipy.git
+    pip install torchtree-scipy/
+
+### Running the pipeline
+
+    nextflow run main.nf --sc2 sc2.fa
 
 `sc2.fa` is the sequence alignment file containing the SARS-CoV-2 sequences (see [SARS-CoV-2](#sars-cov-2) section for more details)
 
-Since the pipeline will take weeks to run to completion one should use a high performance computer. An examples of configuration file for PBS Pro can be found in the [configs](configs/) folder.
+## Pipeline with docker or singularity
+There is no need to install dependencies with docker or singularity.
+
+### Running the pipeline with docker
+
+    nextflow run main.nf -profile docker --sc2 sc2.fa
+
+### Running the pipeline with singularity and PBS
+
+    nextflow -C configs/uts.config run main.nf -profile singularity --sc2 sc2.fa
+
+Since the pipeline will take weeks to run to completion one should use a high performance computer. An example of configuration file for PBS Pro can be found in the [configs](configs/) folder.
 
 ## Summarizing results
 
@@ -42,11 +66,13 @@ For reproducbility, we provide below the version of each library/program used in
 | [physher]           | 1.0.3 |
 | [torchtree]         | 1.0.1 |
 | [torchtree-physher] | 1.0.1 |
+| [torchtree-scipy]   | 1.0.0 |
 | [pytorch]           | 1.12.1 |
 
 
 [physher]: https://github.com/4ment/physher
 [torchtree]: https://github.com/4ment/torchtree
 [torchtree-physher]: https://github.com/4ment/torchtree-physher
+[torchtree-scipy]: https://github.com/4ment/torchtree-scipy
 
 [PyTorch]: https://pytorch.org

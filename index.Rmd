@@ -1,0 +1,18 @@
+---
+title: "torchtree experiments"
+author: "Mathieu"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  pdf_document:
+    toc: true
+---
+
+HCV analysis
+
+```{r child = 'HCV.Rmd'}
+```
+
+SC2 analysis
+
+```{r child = 'SC2.Rmd'}
+```
