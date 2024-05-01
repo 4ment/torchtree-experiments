@@ -53,9 +53,13 @@ Since the pipeline will take weeks to run to completion one should use a high pe
 
 ## Summarizing results
 
+Install [skyplotr](https://github.com/4ment/skyplotr) package using [devtools](https://github.com/hadley/devtools):
+
+    Rscript -e 'devtools::install_github("4ment/skyplotr")'
+
 Generate figures in a single pdf:
 
-    Rscript -e 'rmarkdown::render("plot.Rmd")'
+    Rscript -e 'rmarkdown::render("index.Rmd")'
 
 ## Program and library versions
 
@@ -63,7 +67,7 @@ For reproducbility, we provide below the version of each library/program used in
 
 | Program/Library | Version |
 | --------------- | ------- |
-| [physher]           | 1.0.3 |
+| [physher]           | 2.0.1 |
 | [torchtree]         | 1.0.1 |
 | [torchtree-physher] | 1.0.1 |
 | [torchtree-scipy]   | 1.0.0 |

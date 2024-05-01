@@ -1,4 +1,3 @@
-
 ---
 title: "HCV"
 author: "Mathieu"
@@ -17,14 +16,15 @@ library(readr)
 library(scales) # to access break formatting functions
 library(knitr)
 library(zeallot)
-library(posterior)
 library(stringr)
+library(lemon)
+library(skyplotr)
 
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, fig.path='Figs/')
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, fig.path = "Figs/HCV/")
 ```
 
 ```{r}
-source("R/skygrid.R")
+source("R/utils.R")
 source("R/renamer.R")
 ```
 
@@ -32,312 +32,449 @@ source("R/renamer.R")
 
 
 ```{r}
-parse.time <- function(filename) {
-  v.log = read_lines(filename)
-  as.numeric(v.log[length(v.log) - 2] %>%
-               str_split_i("\t", 2) %>% str_split_i("m", 1))
-}
+parse_iterations <- function(filename) {
+  v_log <- read_lines(filename)
 
-parse.iterations <- function(filename) {
-  v.log = read_lines(filename)
-  
-  for (i in length(v.log):1) {
-    a = v.log[i] %>% str_split("\\s+")
+  for (i in length(v_log):1) {
+    a <- v_log[i] %>% str_split("\\s+")
     if (length(a[[1]]) == 5) {
-      iterations = as.numeric(a[[1]][2])
+      iterations <- as.numeric(a[[1]][2])
       break
     }
   }
   iterations
 }
 
-parse.beast <- function(log.file, model, burnin = 0.1) {
-  df = fread(log.file,
-             sep = "\t",
-             skip = "#",
-             showProgress = FALSE)
-  df = df[(burnin * nrow(df)):nrow(df), ]
-  df = myrename(df, df.rename.beast)
-  
-  data.height = df %>% select(rootHeight)
-  beast.logtheta = df %>% select(starts_with("skygrid.logPopSize"))
-  sky = prepareSkygrid(data.height,
-                       beast.logtheta,
-                       400,
-                       minTime = "lower",
-                       ageOfYoungest = 1994)
-  sky = sky %>% mutate(
+parse_beast <- function(log_file, model, burnin = 0.1) {
+  df <- fread(log_file,
+    sep = "\t",
+    skip = "#",
+    showProgress = FALSE
+  )
+
+  state_count <- df$state[nrow(df)]
+  df <- myrename(df, df.rename.beast) %>% slice(as.integer(burnin * nrow(df)):n())
+
+  beast_logtheta <- df %>% select(starts_with("skygrid.logPopSize"))
+  sky <- prepare_skygrid(df$rootHeight,
+    beast_logtheta,
+    400,
+    age_of_youngest = 1994
+  )
+  sky <- sky %>% mutate(
     divergence = NA,
+    algorithm = "MCMC",
     model = model,
     program = "BEAST",
     label = paste0("BEAST-", model)
   )
-  
-  row_sum = as.numeric(rowSums(select(df, AC, AG, AT, CG, CT, GT)))
-  df = df %>%
+
+  row_sum <- as.numeric(rowSums(select(df, AC, AG, AT, CG, CT, GT)))
+  df_params <- df %>%
     mutate_at(c("AC", "AG", "AT", "CG", "CT", "GT"), ~ . / row_sum) %>%
-    select(rootHeight, precision, likelihood, freqA, AC, shape) %>%
+    select(rootHeight, precision, freqA, AC, shape) %>%
     gather("param", "value") %>%
     mutate(
       divergence = NA,
+      algorithm = "MCMC",
       model = model,
       program = "BEAST",
       label = paste0("BEAST-", model)
     )
-  
-  time = parse.time(file.path(dirname(log.file), "beast.log"))
-  
-  time = data.frame(time = time,
-                    model = model,
-                    iterations = 1000000000)
-  
-  list(params = df,
-       sky = sky,
-       time = time)
+
+  df_probs <- df %>%
+    select(likelihood, prior, coalescent) %>%
+    gather("param", "value") %>%
+    mutate(
+      divergence = NA,
+      algorithm = "MCMC",
+      model = model,
+      program = "BEAST",
+      label = paste0("BEAST-", model)
+    )
+
+  time <- parse_time(file.path(dirname(log_file), "beast.log"))
+
+  time <- data.frame(
+    time = time,
+    model = model,
+    iterations = state_count
+  )
+
+  list(
+    params = df_params,
+    probs = df_probs,
+    sky = sky,
+    time = time
+  )
 }
 ```
 
 ```{r}
-time = parse.time(file.path("results", "HCV", "beast", "skyglide", "beast.log"))
+time <- parse_time(file.path("results", "HCV", "beast", "skyglide", "beast.log"))
 
-df = fread(
+df <- fread(
   file.path("results", "HCV", "beast", "skyglide", "HCV.log"),
   sep = "\t",
   skip = "#",
   data.table = FALSE,
   showProgress = FALSE
 )
-lookup = sapply(1:75, function(x) {
+lookup <- sapply(1:75, function(x) {
   paste0("skygrid.logPopSize", x)
 })
-names(lookup) = sapply(1:75, function(x) {
+names(lookup) <- sapply(1:75, function(x) {
   paste0("popSize", x)
 })
-params.id = c("rootHeight",
-              "likelihood",
-              "freqA",
-              "AC",
-              "shape",
-              "precision",
-              "state")
-df = myrename(df, df.rename.beast) %>%
+params_id <- c(
+  "rootHeight",
+  "freqA",
+  "AC",
+  "shape",
+  "precision",
+  "state"
+)
+df <- myrename(df, df.rename.beast) %>%
   rename(all_of(lookup)) %>%
-  select(all_of(params.id), contains("popSize"))
+  select(all_of(params_id), contains("popSize"))
 
-burnin = 0.1 * nrow(df)
-df = df[burnin:nrow(df), ]
-esss = df[FALSE,]
-vars = cvs = means = df[FALSE, ]
-var0 = summarize_all(df, var)
-sd0 = sqrt(var0)
-mean0 = summarize_all(df, mean)
-cv0 = sd0 / mean0
+vars <- cvs <- means <- df[FALSE, ]
+var0 <- summarize_all(df, var)
+sd0 <- sqrt(var0)
+mean0 <- summarize_all(df, mean)
+cv0 <- sd0 / mean0
 
-every = 5000
-replicates = nrow(df) / every
+every <- 5000
+replicates <- nrow(df) / every
+sampled_every <- df$state[2] - df$state[1]
 
 for (i in 1:replicates) {
-  df.i = df[1:(i * every),]
-  esss = esss %>% bind_rows(summarize_all(df.i, ess_basic))
-  df2.var = summarize_all(df.i, var)
-  df2.mean = summarize_all(df.i, mean)
-  df2.sd = sqrt(df2.var)
-  df2.cv = df2.sd / df2.mean
-  vars = bind_rows(vars, (df2.var - var0) ** 2)
-  cvs = bind_rows(cvs, (df2.cv - cv0) ** 2)
-  means = bind_rows(means, (df2.mean - mean0) ** 2)
+  df_i <- df[1:(i * every), ]
+  df2_var <- summarize_all(df_i, var)
+  df2_mean <- summarize_all(df_i, mean)
+  df2_sd <- sqrt(df2_var)
+  df2_cv <- df2_sd / df2_mean
+  vars <- bind_rows(vars, (df2_var - var0)**2)
+  cvs <- bind_rows(cvs, (df2_cv - cv0)**2)
+  means <- bind_rows(means, (df2_mean - mean0)**2)
 }
-#esss = bind_rows(esss, summarize_all(df, ess_basic))
 
-states = seq(1, (replicates - 1) * every, every) * 1000 + burnin * 1000
-esss$state = states
-vars$state = states
-cvs$state = states
-means$state = states
+states <- seq(1, (replicates - 1) * every, every) * sampled_every
+vars$state <- states
+cvs$state <- states
+means$state <- states
 
-vars = vars %>% mutate(time = time / 1000000000 * state, program = "BEAST")
-cvs = cvs %>% mutate(time = time / 1000000000 * state, program = "BEAST")
-means = means %>% mutate(time = time / 1000000000 * state, program = "BEAST")
+state_count <- df$state[length(df$state)]
+
+vars <- vars %>% mutate(time = time / state_count * state, program = "BEAST")
+cvs <- cvs %>% mutate(time = time / state_count * state, program = "BEAST")
+means <- means %>% mutate(time = time / state_count * state, program = "BEAST")
 ```
 
 
 ```{r}
-lookup = sapply(0:74, function(x) {
+lookup <- sapply(0:74, function(x) {
   paste0("coalescent.theta.", x)
 })
-names(lookup) = sapply(1:75, function(x) {
+names(lookup) <- sapply(1:75, function(x) {
   paste0("popSize", x)
 })
-params.id = c("rootHeight",
-              "likelihood",
-              "freqA",
-              "AC",
-              "shape",
-              "precision",
-              "state")
+params_id <- c(
+  "rootHeight",
+  "freqA",
+  "AC",
+  "shape",
+  "precision",
+  "state"
+)
 
-for(divergence in c("ELBO", "KLpq-10")) {
-  d = if (divergence == "KLpq-10") "KL(p||q)" else divergence
-  p = file.path("results", "HCV", "piecewise-linear", divergence, "physher")
+for (divergence in c("ELBO", "KLpq-10")) {
+  d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
+  p <- file.path("results", "HCV", "piecewise-linear", divergence, "physher")
 
-  time = parse.time(file.path(p, "torchtree.log"))
-  
-  df.m = fread(file.path(p, "means.csv"),
-               sep = ",",
-               data.table = FALSE)
-  df.v = fread(file.path(p, "variances.csv"),
-               sep = ",",
-               data.table = FALSE)
+  time <- parse_time(file.path(p, "torchtree.log"))
 
-  df.m = myrename(df.m, df.rename) %>% rename(state = sample) %>% rename(all_of(lookup)) %>%
-    select(all_of(params.id), contains("popSize"))
-  df.v = myrename(df.v, df.rename) %>% rename(state = sample) %>% rename(all_of(lookup)) %>%
-    select(all_of(params.id), contains("popSize"))
-  
-  iter = as.numeric(df.m$state)
-  
-  df = sweep(df.m, 2, as.numeric(df.m[nrow(df.m), ]), '-') ** 2
-  means = df %>% mutate(state = iter,
-                        program = d,
-                        time = time / iter[length(iter)] * state) %>%
+  df_m <- fread(file.path(p, "means.csv"),
+    sep = ",",
+    data.table = FALSE
+  )
+  df_v <- fread(file.path(p, "variances.csv"),
+    sep = ",",
+    data.table = FALSE
+  )
+
+  df_m <- myrename(df_m, df.rename) %>%
+    rename(state = sample) %>%
+    rename(all_of(lookup)) %>%
+    select(all_of(params_id), contains("popSize"))
+  df_v <- myrename(df_v, df.rename) %>%
+    rename(state = sample) %>%
+    rename(all_of(lookup)) %>%
+    select(all_of(params_id), contains("popSize"))
+
+  states <- as.numeric(df_m$state)
+  time_per_state <- time / states[length(states)]
+
+  df <- sweep(df_m, 2, as.numeric(df_m[nrow(df_m), ]), "-")**2
+  means <- df %>%
+    mutate(
+      state = states,
+      program = d,
+      time = time_per_state * state
+    ) %>%
     bind_rows(means)
-  
-  df = sweep(df.v, 2, as.numeric(df.v[nrow(df.v), ]), '-') ** 2
-  vars = df %>% mutate(state = iter,
-                       program = d,
-                       time = time / iter[length(iter)] * state) %>%
+
+  df <- sweep(df_v, 2, as.numeric(df_v[nrow(df_v), ]), "-")**2
+  vars <- df %>%
+    mutate(
+      state = states,
+      program = d,
+      time = time_per_state * state
+    ) %>%
     bind_rows(vars)
-  
-  df = sweep(sqrt(df.v) / df.m, 2, as.numeric(sqrt(df.v[nrow(df.v), ]) /
-                                                df.m[nrow(df.m), ]), '-') ** 2
-  cvs = df %>% mutate(state = iter,
-                      program = d,
-                      time = time / iter[length(iter)] * state) %>%
+
+  df <- sweep(sqrt(df_v) / df_m, 2, as.numeric(sqrt(df_v[nrow(df_v), ]) /
+    df_m[nrow(df_m), ]), "-")**2
+  cvs <- df %>%
+    mutate(
+      state = states,
+      program = d,
+      time = time_per_state * state
+    ) %>%
     bind_rows(cvs)
 }
 ```
 
-
-# Plot ESS against iteration
 ```{r}
-df2 = esss %>% select(all_of(c(params.id, "state"))) %>% gather("param", "value",-state)
-ggplot(df2 , aes(x = state, y = value)) +
+df_m <- fread(file.path("HCV-ELBO-100", "means.csv"),
+  sep = ",",
+  data.table = FALSE
+)
+df_v <- fread(file.path("HCV-ELBO-100", "variances.csv"),
+  sep = ",",
+  data.table = FALSE
+)
+
+df_m <- myrename(df_m, df.rename) %>%
+  rename(state = sample) %>%
+  rename(all_of(lookup)) %>%
+  select(all_of(params_id), contains("popSize"))
+df_v <- myrename(df_v, df.rename) %>%
+  rename(state = sample) %>%
+  rename(all_of(lookup)) %>%
+  select(all_of(params_id), contains("popSize"))
+
+df <- sweep(sqrt(df_v) / df_m, 2, as.numeric(sqrt(df_v[nrow(df_v), ]) /
+  df_m[nrow(df_m), ]), "-")**2
+cvs_extended <- df %>%
+  mutate(
+    state = as.numeric(df_m$state),
+    program = "ELBO",
+    time = time_per_state * state
+  ) %>%
+  bind_rows(cvs)
+```
+
+# Squared difference of coefficient of variation against time
+```{r}
+df2 <- cvs %>%
+  select(all_of(c(params_id, "state", "program", "time"))) %>%
+  # filter(time > 1000) %>%
+  mutate(program = factor(program, levels = c("KL(p||q)", "ELBO", "BEAST"))) %>%
+  gather("param", "CV", -state, -time, -program)
+
+g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
+  my_theme +
   geom_line() +
-  facet_wrap( ~ param, scales = "free")
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
 
-```{r}
-df2 = esss %>% select(contains("popSize"), state) %>% gather("param", "value",-state)
-df2$param = factor(df2$param,
-                   levels = sapply(1:75, function(x) {
-                     paste0("popSize", x)
-                   }))
-ggplot(df2, aes(x = state, y = value, color = param)) +
-  geom_line()
-```
+\newpage
 
+# Squared difference of coefficient of variation against time (log scale)
 ```{r}
-df2 = cvs %>%# filter(state > 1000000) %>%
-  select(all_of(c(params.id, "state", "program", "time"))) %>%
-  gather("param", "CV", -state, -time, -program) %>% filter(program != "BEAST")
+df2 <- cvs %>%
+  select(all_of(c(params_id, "state", "program", "time"))) %>%
+  filter(state > 10000) %>%
+  mutate(program = factor(program, levels = c("KL(p||q)", "ELBO", "BEAST"))) %>%
+  gather("param", "value", -state, -time, -program) %>%
+  filter(!is.infinite(log10(value)))
 
-ggplot(df2 , aes(x = time, y = CV, color = program)) +
+g <- ggplot(df2, aes(x = time, y = value, color = program)) +
+  my_theme +
   geom_line() +
-  facet_wrap(~ param, scales = "free")
+  scale_y_continuous(trans = "log10") +
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
 
-```{r}
-df2 = cvs %>% select(all_of(c(params.id, "state", "program", "time"))) %>%
-  gather("param", "CV",-state,-time,-program) %>% filter(program == "BEAST")
+\newpage
 
-ggplot(df2 , aes(x = time, y = CV, color = program)) +
+# Squared difference of coefficient of variation against time (log scale, VB only)
+```{r}
+df2 <- cvs %>%
+  select(all_of(c(params_id, "state", "program", "time"))) %>%
+  # filter(state > 10000) %>%
+  gather("param", "value", -state, -time, -program) %>%
+  filter(program != "BEAST") %>%
+  filter(!is.infinite(log10(value)))
+
+g <- ggplot(df2, aes(x = time, y = value, color = program)) +
+  my_theme +
   geom_line() +
-  facet_wrap( ~ param, scales = "free")
+  # geom_vline(xintercept=as.numeric(df.m$state)[1]) +
+  scale_y_continuous(trans = "log10") +
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
 
+\newpage
 
 ```{r}
-df2 = cvs %>% select(!contains("popSize")) %>%
+df2 <- cvs_extended %>% # filter(state > 100000) %>%
+  select(all_of(c(params_id, "state", "program", "time"))) %>%
+  gather("param", "CV", -state, -time, -program) # %>% filter(program != "BEAST")
+
+g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
+  my_theme +
+  geom_line() +
+  # geom_vline(xintercept=as.numeric(df.m$state)[1]) +
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+\newpage
+
+# Squared difference of coefficient of variation against time (BEAST only)
+```{r}
+df2 <- cvs %>%
+  select(all_of(c(params_id, "state", "program", "time"))) %>%
+  gather("param", "CV", -state, -time, -program) %>%
+  filter(program == "BEAST")
+
+g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
+  my_theme +
+  geom_line() +
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+
+# Smoothing of trajectory using sliding window
+```{r}
+df2 <- cvs %>%
+  select(!contains("popSize")) %>%
   filter(program == "BEAST") %>%
   mutate(across(
     !c(time, program, state),
     ~ stats::filter(.x, filter = rep(1, 50), side = 2) / 50
   ))
-df2 = cvs %>% select(!contains("popSize")) %>%
-  filter(program == "ELBO") %>% #filter(state> 1000000) %>%
-  mutate(across(
-    !c(time, program, state),
-    ~ stats::filter(.x, filter = rep(1, 100), side = 2) / 100
-  )) %>%
-  bind_rows(df2)
-df2 = cvs %>% select(!contains("popSize")) %>%
-  filter(program == "KL(p||q)") %>% #filter(state> 1000000) %>%
-  mutate(across(
-    !c(time, program, state),
-    ~ stats::filter(.x, filter = rep(1, 100), side = 2) / 100
-  )) %>%
-  bind_rows(df2)
-df2 = df2[rowSums(is.na(df2)) == 0,] %>%  gather("param", "value",-state,-time,-program)
 
-ggplot(df2, aes(x = time, y = value, color = program)) +
+df2 <- cvs %>%
+  select(!contains("popSize")) %>%
+  filter(program %in% c("ELBO", "KL(p||q)")) %>%
+  mutate(across(
+    !c(time, program, state),
+    ~ stats::filter(.x, filter = rep(1, 100), side = 2) / 100
+  )) %>%
+  bind_rows(df2)
+
+
+df2 <- df2[rowSums(is.na(df2)) == 0, ] %>% gather("param", "value", -state, -time, -program)
+
+g <- ggplot(df2, aes(x = time, y = value, color = program)) +
   geom_line() +
-  facet_wrap( ~ param, scales = "free")
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
 
-```{r}
-c(params, skys, times) %<-% parse.beast(file.path("results", "HCV", "beast", "skygrid", "HCV.log"), "skygrid", 0.1)
-data = parse.beast(file.path("results", "HCV", "beast", "skyglide", "HCV.log"), "skyglide", 0.1)
-skys = rbind(skys, data$sky)
-params = rbind(params, data$params)
-times = rbind(times, data$time)
-times = times %>% mutate(program="BEAST", divergence="MCMC")
+\newpage
 
-for(model in c("piecewise-linear", "skygrid")) {
+# Skygrid
+```{r}
+c(params, probs, skys, times) %<-% parse_beast(file.path("results", "HCV", "beast", "skygrid", "HCV.log"), "skygrid", 0.1)
+data <- parse_beast(file.path("results", "HCV", "beast", "skyglide", "HCV.log"), "skyglide", 0.1)
+skys <- rbind(skys, data$sky)
+params <- rbind(params, data$params)
+probs <- rbind(probs, data$probs)
+times <- rbind(times, data$time)
+times <- times %>% mutate(program = "BEAST", divergence = NA, algorithm = "MCMC")
+
+for (model in c("piecewise-linear", "skygrid")) {
   for (divergence in c("ELBO", "KLpq-10")) {
     for (program in c("physher")) {
-      path = file.path("results", "HCV", model, divergence, program)
-      df = read.csv(file.path(path, "samples.csv"), sep = "\t")
-      df = myrename(df, df.rename)
-      
-      data.height = df %>% select(rootHeight)
-      df.logtheta = df %>% select(starts_with("coalescent.theta")) %>% log()
-      skygrid = prepareSkygrid(data.height,
-                               df.logtheta,
-                               400,
-                               minTime = "lower",
-                               ageOfYoungest = 1994)
-      m = if (model == "piecewise-linear") "skyglide" else model
-      d = if (divergence == "KLpq-10") "KL(p||q)" else divergence
-      
-      label = paste("torchtree", m, d, sep = "-")
-      
-      skys = skygrid %>% mutate(
-        label = label,
-        divergence = d,
-        model = model,
-        program = program
-      ) %>%
+      path <- file.path("results", "HCV", model, divergence, program)
+      df <- read.csv(file.path(path, "samples.csv"), sep = "\t")
+      df <- myrename(df, df.rename)
+
+      df_logtheta <- df %>%
+        select(starts_with("coalescent.theta")) %>%
+        log()
+
+      skygrid <- prepare_skygrid(df$rootHeight,
+        df_logtheta,
+        400,
+        age_of_youngest = 1994
+      )
+      m <- if (model == "piecewise-linear") "skyglide" else model
+      d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
+
+      label <- paste("torchtree", m, d, sep = "-")
+
+      skys <- skygrid %>%
+        mutate(
+          label = label,
+          divergence = d,
+          model = m,
+          program = program,
+          algorithm = "VB",
+        ) %>%
         bind_rows(skys)
-      
-      params = df %>%
-        select(rootHeight, likelihood, freqA, AC, shape, precision) %>%
-        #mutate(prior = prior - 6 * log(6), joint = joint - 6 * log(6)) %>%
+
+      params <- df %>%
+        select(rootHeight, freqA, AC, shape, precision) %>%
         gather("param", "value") %>%
         mutate(
           label = label,
           divergence = d,
           program = program,
-          model = model
+          model = m,
+          algorithm = "VB",
         ) %>%
         bind_rows(params)
-      
-      iterations = parse.iterations(file.path(path, "torchtree.txt"))
-      time = parse.time(file.path(path, "torchtree.log"))
-      
-      times = data.frame(
+
+      probs <- df %>%
+        select(likelihood, coalescent, prior) %>%
+        mutate(prior = prior - 6 * log(6)) %>%
+        gather("param", "value") %>%
+        mutate(
+          label = label,
+          divergence = d,
+          program = program,
+          model = m,
+          algorithm = "VB",
+        ) %>%
+        bind_rows(probs)
+
+      iterations <- parse_iterations(file.path(path, "torchtree.txt"))
+      time <- parse_time(file.path(path, "torchtree.log"))
+
+      times <- data.frame(
         time = time,
-        divergence = divergence,
+        divergence = d,
         model = m,
+        algorithm = "VB",
         program = program,
         iterations = iterations
       ) %>%
@@ -345,195 +482,158 @@ for(model in c("piecewise-linear", "skygrid")) {
     }
   }
 }
-skys = skys %>% mutate_at(c("low", "high", "mean", "median"), exp
-)
+skys <- skys %>% mutate_at(c("pop_size_low", "pop_size_high", "pop_size"), exp)
 ```
 
-```{r skygrid-params}
-df.params = params %>%
-  filter(model == "skygrid" | program == "BEAST")
+```{r}
+for (model in c("piecewise-linear", "skygrid")) {
+  m <- if (model == "piecewise-linear") "skyglide" else model
+  label <- paste("torchtree", m, "HMC", sep = "-")
 
-ggplot(df.params, aes(value, group = label, colour = label)) +
-  geom_density() +
-  facet_wrap( ~ param, scales = "free") +
-  labs(x = "Value", y = "Density") +
-  theme_bw() +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"),
-    legend.title = element_blank()
+  df <- read.csv(
+    file.path(
+      "results",
+      "HCV",
+      model,
+      "hmc",
+      "physher",
+      "samples.csv"
+    ),
+    sep = "\t"
   )
+  df <- df[(0.2 * nrow(df)):nrow(df), ]
+  df <- myrename(df, df.rename)
+
+  df_logtheta <- df %>% select(starts_with("coalescent.theta")) # %>% log()
+  skygrid <- prepare_skygrid(df$rootHeight,
+    df_logtheta,
+    400,
+    age_of_youngest = 1994
+  )
+  skys <- skygrid %>%
+    mutate(
+      label = label,
+      divergence = NA,
+      model = m,
+      program = "torchtree",
+      algorithm = "HMC"
+    ) %>%
+    mutate_at(c("pop_size_low", "pop_size_high", "pop_size"), exp) %>%
+    bind_rows(skys)
+
+  params_id <- c("rootHeight", "freqA", "AC", "shape", "precision")
+  probs_id <- c("likelihood", "prior", "coalescent")
+
+  df_hmc <- df %>%
+    select(all_of(
+      c(params_id, probs_id)
+    )) %>%
+    mutate(prior = prior - 6 * log(6)) %>%
+    gather("param", "value") %>%
+    mutate(
+      label = label,
+      divergence = NA,
+      program = "torchtree",
+      model = m
+    )
+
+  params <- df_hmc %>%
+    filter(param %in% params_id) %>%
+    bind_rows(params)
+
+  probs <- df_hmc %>%
+    filter(param %in% probs_id) %>%
+    bind_rows(probs)
+}
 ```
 
-```{r}
-df = read.csv(
-  file.path(
-    "results",
-    "HCV",
-    "piecewise-linear",
-    "hmc",
-    "physher",
-    "samples.csv"
-  ),
-  sep = "\t"
-)
-df = df[(0.2 * nrow(df)):nrow(df),]
-df = myrename(df, df.rename)
-
-data.height = df %>% select(rootHeight)
-df.logtheta = df %>% select(starts_with("coalescent.theta")) #%>% log()
-skygrid = prepareSkygrid(data.height,
-                         df.logtheta,
-                         400,
-                         minTime = "lower",
-                         ageOfYoungest = 1994)
-skys = skygrid %>% mutate(
-  label = "torchtree-skyglide-HMC",
-  divergence = NA,
-  model = "skyglide",
-  program = "torchtree"
-) %>%
-  mutate_at(c("low", "high", "mean", "median"), exp) %>%
-  bind_rows(skys)
-
-df.skyglide.hmc = df %>%
-  select(any_of(
-    c("rootHeight", "likelihood", "freqA", "AC", "shape", "precision")
-  )) %>%
-  mutate(
-    label = paste("torchtree", "skyglide", "HMC", sep = "-"),
-    divergence = NA,
-    program = "torchtree",
-    model = "skyglide"
-  ) %>%
-  gather("param", "value",-model,-program,-divergence,-label) %>%
-  bind_rows(params) %>%
-  filter(model == "skyglide")
-```
-
-```{r}
-path = file.path("results", "HCV", "skygrid", "hmc", "physher")
-df = read.csv(file.path(path, "samples.csv"), sep = "\t")
-df = df[(0.2 * nrow(df)):nrow(df),]
-df = myrename(df, df.rename)
-
-data.height = df %>% select(rootHeight)
-df.logtheta = df %>% select(starts_with("coalescent.theta")) #%>% log()
-skygrid = prepareSkygrid(data.height,
-                         df.logtheta,
-                         400,
-                         minTime = "lower",
-                         ageOfYoungest = 1994)
-skys = skygrid %>% mutate(
-  label = "torchtree-skygrid-HMC",
-  divergence = NA,
-  model = "skygrid",
-  program = "torchtree"
-) %>%
-  mutate_at(c("low", "high", "mean", "median"), exp) %>%
-  bind_rows(skys)
-
-df.skygrid.hmc = df %>%
-  select(any_of(
-    c("rootHeight", "likelihood", "freqA", "AC", "shape", "precision")
-  )) %>%
-  mutate(
-    label = paste("torchtree", "skygrid", "HMC", sep = "-"),
-    divergence = NA,
-    program = "torchtree",
-    model = "skygrid"
-  ) %>%
-  gather("param", "value",-model,-program,-divergence,-label) %>%
-  bind_rows(params) %>%
+## Parameter densities with skygrid
+```{r skygrid-params}
+df_params <- params %>%
   filter(model == "skygrid")
 
-iterations = parse.iterations(file.path(path, "torchtree.txt"))
-time = parse.time(file.path(path, "torchtree.log"))
+g <- ggplot(df_params, aes(value, group = label, colour = label)) +
+  my_theme +
+  geom_density() +
+  facet_wrap(~param, scales = "free") +
+  labs(colour = NULL, x = "Value", y = "Density")
 
-times = data.frame(
-  time = time,
-  divergence = "HMC",
-  model = m,
-  program = "torchtree",
-  iterations = iterations
-) %>%
-  bind_rows(times)
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
+
+\newpage
+
+## Densities with skygrid
+```{r skygrid-probs}
+df_probs <- probs %>%
+  filter(model == "skygrid")
+
+ggplot(df_probs, aes(value, group = label, colour = label)) +
+  my_theme +
+  geom_density() +
+  facet_wrap(~param, scales = "free", nrow = 2) +
+  labs(colour = NULL, x = "Value", y = "Density")
+```
+
+\newpage
 
 ```{r}
 kable(times)
 ```
 
+\newpage
+
+## Parameter densities with skygrid and skyglide
 ```{r}
-ggplot(df.skygrid.hmc, aes(value, group = label, colour = label)) +
+ggplot(params, aes(value, colour = label)) +
+  my_theme + 
   geom_density() +
   facet_wrap(~param, scales = "free") +
-  labs(x = "Value", y = "Density") +
-  theme_bw() +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"),
-    legend.title=element_blank()
-  )
+  labs(colour=NULL, x = "Value", y = "Density")
 ```
+
+\newpage
+
+## Densities with skygrid and skyglide
 ```{r}
-ggplot(df.skyglide.hmc, aes(value, group = label, colour = label)) +
+ggplot(probs, aes(value, colour = label)) +
+  my_theme + 
   geom_density() +
   facet_wrap(~param, scales = "free") +
-  labs(x = "Value", y = "Density") +
-  theme_bw() +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"),
-    legend.title=element_blank()
-  )
+  labs(colour=NULL, x = "Value", y = "Density")
 ```
+
+\newpage
 
 ```{r skyglide-params}
 df = params %>%
-  filter(model != "skygrid" | program =="BEAST") #%>% bind_rows(df.skyglide.hmc)
+  filter((model != "skygrid" | program =="BEAST") )#& algorithm != "HMC")
 
-ggplot(df, aes(value, group = label, colour = label)) +
+g = ggplot(df, aes(value, colour = label)) +
+  my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
-  labs(x = "Value", y = "Density") +
-  theme_bw() +
-  theme(
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"),
-    legend.title=element_blank()
-  )
+  labs(x = "Value", y = "Density", colour=NULL)
+
+reposition_legend(g, 'center', panel='panel-3-2')
 ```
 
+\newpage
+
+# Skygrid and skyglide plots
 ```{r sky-plots}
-ggplot(skys, aes(x = x, y = median, color = label)) +
-  theme_bw() +
-  theme(
-    #legend.position="top",
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(), strip.background = element_blank(),
-    panel.border = element_rect(colour = "black"),
-    legend.title=element_blank()
-  ) +
-  geom_ribbon(aes(ymin = low, ymax = high, fill = label), alpha = 0.5) +
-  geom_line() +
-  # geom_vline(xintercept=1994-seq(0, 400, 400/74)) +
-  scale_y_log10(
-    breaks = trans_breaks("log10", function(x) 10^x),
-    labels = trans_format("log10", math_format(10^.x))
-  ) +
-  facet_wrap(~label) +
-  xlab("Year") +
-  ylab("Effective population size")
+skys2 = skys %>% mutate(proghow = str_replace(label, "-skyg\\w+", ""),
+                       model = factor(model, levels=c("skygrid", "skyglide")),
+                       proghow = factor(proghow, levels = c("BEAST", "torchtree-ELBO", "torchtree-KL(p||q)", "torchtree-HMC")))
+skyplot(skys2, fill_by = "proghow", facet=list(rows="model", cols="proghow")) +
+  theme(legend.position = "none")
 ```
 
+\newpage
 
+# Speed table
 ```{r}
 grids_info = read.csv(file.path("results", "HCV", "info.csv"))
 kable(grids_info)
 ```
+

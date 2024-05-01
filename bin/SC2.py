@@ -4,6 +4,13 @@ import xml.etree.ElementTree as ET
 
 import click
 
+# Template was generated using torchtree-cli:
+# torchtree-cli advi -i sc2.fa -t sc2.tree --clock strict --coalescent skyglide \
+# --scipy_gamma_site -C 4 --cutoff 0.3 --grid 5  --heights_init tree -m SYM \
+# --frequencies 0.2988387179135696,0.18371883310279738,0.1958960436176954,0.32154640536593765 \
+# --rate 0.0008 --date_regex "(\d+)-(\d+)-(\d+)$" --date_format "yyyy-MM-dd" \
+# --coalescent_init constant --tol_rel_obj 0 --iter 1000000 \
+# --checkpoint_all
 
 def read_fasta(alignment):
     sequence = None
