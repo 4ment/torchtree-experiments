@@ -129,7 +129,7 @@ gtr_thetas <- df_beast_gtr %>%
 for (divergence in c("ELBO", "KLpq-10")) {
   d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
   df_t_gtr <- fread(
-    file.path(resultsdir, "torchtree", "GTR", divergence, "skyglide", "torchtree", "samples.csv"),
+    file.path(resultsdir, "torchtree", "GTR", "skyglide", divergence, "torchtree", "samples.csv"),
     sep = "\t"
   )
 
@@ -357,7 +357,7 @@ hky_thetas <- df_beast %>%
 
 for (divergence in c("ELBO", "KLpq-10")) {
   d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
-  df_t <- fread(file.path(resultsdir, "torchtree", "HKY-RE", divergence, "skyglide", "torchtree", "samples.csv"),
+  df_t <- fread(file.path(resultsdir, "torchtree", "HKY-RE", "skyglide", divergence, "torchtree", "samples.csv"),
     sep = "\t"
   )
   t_coefs <- df_t %>% select(starts_with("substmodel.kappa.random"))
@@ -581,7 +581,7 @@ where $q$ is a normal distribution with mean $\mu_{ji}-\mu_{ij}$ and variance $\
 $\mu_{ij}$ and $\sigma_{ij}$ are the mean and standard deviation of the normal variational approximation of $\epsilon_{ij}$.
 
 ```{r}
-p <- file.path(resultsdir, "torchtree", "HKY-RE", "ELBO", "skyglide", "torchtree")
+p <- file.path(resultsdir, "torchtree", "HKY-RE", "skyglide", "ELBO", "torchtree")
 if (!file.exists(file.path(p, "checkpoints"))) {
   untar(file.path(p, "checkpoints.tar.gz"), exdir = file.path(p, "checkpoints"))
 }
@@ -663,8 +663,10 @@ kable(grids_info)
 
 # Convergence
 ```{r}
+use_budget <- T
+
 p <- file.path("results", "SC2", "beast", "HKY-RE", "skyglide")
-time <- parse_time(file.path(p, "beast.log"))
+beast_time <- parse_time(file.path(p, "beast.log"))
 
 df <- fread(
   file.path(p, "SC2_MH.log"),
@@ -677,13 +679,20 @@ lookup <- c(
   sapply(1:5, function(x) {
     paste0("skygrid.logPopSize", x)
   }),
+  sapply(1:12, function(x) {
+    paste0("glmRandCoefficients", x)
+  }),
   "treeModel.rootHeight",
   "skygrid.precision",
   "alpha"
 )
-names(lookup) <- c(sapply(1:5, function(x) {
+names(lookup) <- c(
+  sapply(1:5, function(x) {
   paste0("popSize", x)
-}), "rootHeight", "precision", "shape")
+  }),
+  c("reAC", "reAG", "reAT", "reCG", "reCT", "reGT", "reCA", "reGA", "reTA", "reGC", "reTC", "reTG"),
+  "rootHeight", "precision", "shape"
+)
 
 params_id <- c(
   "rootHeight",
@@ -695,7 +704,7 @@ params_id <- c(
 df <- df %>%
   mutate(kappa = exp(log.kappa)) %>%
   rename(all_of(lookup)) %>%
-  select(all_of(params_id), contains("popSize"))
+  select(all_of(params_id), contains("popSize"), starts_with("re"))
 
 vars <- cvs <- means <- df[FALSE, ]
 var0 <- summarize_all(df, var)
@@ -721,18 +730,23 @@ for (i in 1:replicates) {
 vars$state <- seq(1, (replicates - 1) * every, every) * 500
 cvs$state <- vars$state
 means$state <- vars$state
-vars <- vars %>% mutate(time = time / state_count * state, program = "BEAST")
-cvs <- cvs %>% mutate(time = time / state_count * state, program = "BEAST")
-means <- means %>% mutate(time = time / state_count * state, program = "BEAST")
+vars <- vars %>% mutate(time = beast_time / state_count * state, program = "BEAST")
+cvs <- cvs %>% mutate(time = beast_time / state_count * state, program = "BEAST")
+means <- means %>% mutate(time = beast_time / state_count * state, program = "BEAST")
 ```
 
 ```{r}
-lookup <- sapply(0:4, function(x) {
+lookup <- c(sapply(0:4, function(x) {
   paste0("coalescent.theta.", x)
-})
-names(lookup) <- sapply(1:5, function(x) {
+}), sapply(0:11, function(x) {
+  paste0("substmodel.kappa.random.", x)
+}))
+names(lookup) <- c(
+  sapply(1:5, function(x) {
   paste0("popSize", x)
-})
+  }),
+  c("reAC", "reAG", "reAT", "reCG", "reCT", "reGT", "reCA", "reGA", "reTA", "reGC", "reTC", "reTG")
+)
 
 lookup <- c(
   lookup,
@@ -749,8 +763,8 @@ for (divergence in c("ELBO", "KLpq-10")) {
     "SC2",
     "torchtree",
     "HKY-RE",
-    divergence,
     "skyglide",
+    divergence,
     "torchtree"
   )
   v_log <- read_lines(file.path(p, "torchtree.log"))
@@ -776,17 +790,29 @@ for (divergence in c("ELBO", "KLpq-10")) {
   df_m <- df_m %>%
     rename(state = sample) %>%
     rename(any_of(lookup)) %>%
-    select(all_of(params_id), contains("popSize"))
+    select(all_of(params_id), contains("popSize"), starts_with("re"))
   df_v <- df_v %>%
     rename(state = sample) %>%
     rename(any_of(lookup)) %>%
-    select(all_of(params_id), contains("popSize"))
+    select(all_of(params_id), contains("popSize"), starts_with("re"))
   d <- if (divergence == "KLpq-10") {
     "KL(p||q)"
   } else {
     divergence
   }
   iter <- as.numeric(df_m$state)
+
+  # beast and torchtree would have run for the same amount of time (i.e. budget)
+  if (use_budget) {
+    total_iter <- iter[length(iter)]
+    index <- which.min(abs(time / total_iter * df_v$state - beast_time))
+    df_m <- df_m[1:index, ]
+    df_v <- df_v[1:index, ]
+    iter <- as.numeric(df_m$state)
+    time <- time / total_iter * iter[length(iter)]
+  }
+
+
   df_m2 <- sweep(df_m, 2, as.numeric(df_m[nrow(df_m), ]), "-")**2
   df_m2 <- df_m2 %>% mutate(
     state = iter,
@@ -817,8 +843,7 @@ for (divergence in c("ELBO", "KLpq-10")) {
 
 ```{r hkyre-cv-other}
 df2 <- cvs %>%
-  filter(time < 2000) %>%
-  filter(program != "KL(p||q)") %>%
+  # filter(time < 2000) %>%
   select(all_of(c(params_id, "state", "program", "time"))) %>%
   gather("param", "CV", -state, -time, -program)
 
@@ -832,8 +857,7 @@ ggplot(df2, aes(x = time, y = CV, color = program)) +
 
 ```{r hkyre-cv-coalescent}
 df2 <- cvs %>%
-  filter(time < 2000) %>%
-  filter(program != "KL(p||q)") %>%
+  # filter(time < 2000) %>%
   select(contains("pop"), state, time, program) %>%
   gather("param", "CV", -state, -time, -program)
 
@@ -845,6 +869,25 @@ g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
 
 reposition_legend(g, "center", panel = "panel-3-2")
 ```
+
+\newpage
+
+```{r hkyre-cv-coefs}
+df2 <- cvs %>%
+  # filter(time < 2000) %>%
+  select(starts_with("re"), all_of(c("state", "program", "time"))) %>%
+  gather("param", "CV", -state, -time, -program) %>%
+  filter(!is.nan(CV)) %>%
+  mutate(param = factor(param, levels = c("reAC", "reAG", "reAT", "reCG", "reCT", "reGT", "reCA", "reGA", "reTA", "reGC", "reTC", "reTG")))
+
+ggplot(df2, aes(x = time, y = CV, color = program)) +
+  my_theme +
+  geom_line() +
+  scale_y_continuous(trans = "log10") +
+  facet_wrap(~param, scales = "free") +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+```
+
 \newpage
 
 # VB traces
@@ -852,7 +895,7 @@ reposition_legend(g, "center", panel = "panel-3-2")
 df_elbos <- NULL
 for (model in c("GTR", "HKY-RE")) {
   df <- fread(
-    file.path(resultsdir, "torchtree", model, "ELBO", "skyglide", "torchtree", "elbo.csv"),
+    file.path(resultsdir, "torchtree", model, "skyglide", "ELBO", "torchtree", "elbo.csv"),
     sep = ","
   )
   df <- df %>%
@@ -870,4 +913,25 @@ ggplot(df_elbos, aes(x = iteration, y = ELBO, color = model)) +
 ```{r}
 ggplot(df_elbos %>% filter(iteration > 100000), aes(x = iteration, y = ELBO, color = model)) +
   geom_line()
+```
+
+\newpage
+
+# Speed table
+```{r}
+infos <- NULL
+
+for (divergence in c("ELBO", "KLpq-10")) {
+  for (engine in c("physher", "torchtree")) {
+    for (model in c("HKY-RE", "GTR")) {
+      path <- file.path("results", "SC2", "torchtree", model, "skyglide", divergence, engine)
+      if (file.exists(path)) {
+        info <- read.csv(file.path(path, "info.csv"))
+        infos <- rbind(infos, info)
+      }
+    }
+  }
+}
+
+kable(infos)
 ```

@@ -1,14 +1,15 @@
 #!/usr/bin/env nextflow
 
+include { TORCHTREE_SAMPLING; TORCHTREE_PARSE } from './common.nf'
 
 results="${params.results_dir}/HCV"
 input_seq="$projectDir/data/HCV/HCV.fasta"
 input_tree="$projectDir/data/HCV/HCV.tree"
 
 
-def create_arguments(coalescent, divergence, engine){
+def create_arguments(model, coalescent, divergence, engine){
   def args = " -i ${input_seq} -t ${input_tree}"
-  args += " -m GTR -C 4"
+  args += " -m ${model} -C 4"
   args += " --use_tip_states"
   args += " --clock strict --dates 0 --rate 0.00079"
   args += " --heights_init tree"
@@ -45,19 +46,18 @@ def create_arguments(coalescent, divergence, engine){
 }
 
 process RUN_TORCHTREE_HCV {
-  publishDir "${results}/torchtree/${coalescent}/${divergence}/${engine}/", mode: 'copy'
+  publishDir "${results}/torchtree/${model}/${coalescent}/${divergence}/${engine}/", mode: 'copy'
 
   input:
-    tuple val(coalescent), val(divergence), val(engine)
+    tuple val(model), val(coalescent), val(divergence), val(engine)
   output:
-    path("torchtree.json")
-    path("checkpoints.tar.gz")
+    tuple val(model), val(coalescent), val(divergence), val(engine)
+    tuple path("torchtree.json"), path("checkpoints.tar.gz")
+    tuple path("torchtree.log"), path("torchtree.txt")
     path("samples.csv")
     path("samples.trees")
-    path("torchtree.log")
-    path("torchtree.txt")
   script:
-    args = create_arguments(coalescent, divergence, engine)
+    args = create_arguments(model, coalescent, divergence, engine)
 
   """
   torchtree-cli advi --iter 10000000 \
@@ -68,16 +68,16 @@ process RUN_TORCHTREE_HCV {
   					 > torchtree.json
   { time \
     torchtree -s 1 torchtree.json  > torchtree.txt ; } 2> torchtree.log
-  tar -czf checkpoints.tar.gz checkpoint-*
+  tar -czf checkpoints.tar.gz checkpoint-* 
   """
 }
 
 process RUN_TORCHTREE_HMC {
-  publishDir "${results}/torchtree/${coalescent}/hmc/${engine}/", mode: 'copy'
+  publishDir "${results}/torchtree/${model}/${coalescent}/hmc/${engine}/", mode: 'copy'
   errorStrategy 'ignore'
 
   input:
-    tuple val(coalescent), val(engine)
+    tuple val(model), val(coalescent), val(engine)
   output:
     path("torchtree.json")
     path("checkpoint.json")
@@ -86,7 +86,7 @@ process RUN_TORCHTREE_HMC {
     path("torchtree.log")
     path("torchtree.txt")
   script:
-    args = create_arguments(coalescent, "", engine)
+    args = create_arguments(model, coalescent, "", engine)
 
   """
   torchtree-cli hmc --iter 10000000 \
@@ -103,10 +103,10 @@ process RUN_TORCHTREE_HMC {
 }
 
 process RUN_TORCHTREE_MCMC {
-  publishDir "${results}/torchtree/${coalescent}/mcmc/${engine}/", mode: 'copy'
+  publishDir "${results}/torchtree/${model}/${coalescent}/mcmc/${engine}/", mode: 'copy'
 
   input:
-    tuple val(susbtmodel), val(categories), val(sitemodel), val(coalescent), val(integrated), val(engine), val(root)
+    tuple val(model), val(coalescent), val(engine)
   output:
     path("torchtree.json")
     path("checkpoint.json")
@@ -115,12 +115,11 @@ process RUN_TORCHTREE_MCMC {
     path("torchtree.log")
     path("torchtree.txt")
   script:
-    args = create_arguments(coalescent, "", engine)
+    args = create_arguments(model, coalescent, "", engine)
 
   """
-  torchtree-cli hmc  --iter 10000000 \
+  torchtree-cli mcmc  --iter 10000000 \
                      --stem samples \
-                     --adapt_step_size adaptive \
                      ${args} \
   					 > torchtree.json
   { time \
@@ -129,10 +128,10 @@ process RUN_TORCHTREE_MCMC {
 }
 
 process RUN_BEAST_HCV {
-  publishDir "${results}/beast/${model}/", mode: 'copy'
+  publishDir "${results}/beast/${coalescent}/", mode: 'copy'
 
   input:
-    val(model)
+    val(coalescent)
   output:
     path("*.log")
     path("*.trees")
@@ -140,22 +139,28 @@ process RUN_BEAST_HCV {
     path("beast.txt")
   """
   { time \
-    beast ${projectDir}/data/HCV/beast/HCV_${model}.xml  > beast.txt ; } 2> beast.log
+    beast ${projectDir}/data/HCV/beast/HCV_${coalescent}.xml  > beast.txt ; } 2> beast.log
   """
 }
 
 workflow HCV {
+  models = Channel.from("GTR")
   coalescent = Channel.from("skygrid", "skyglide")
   divergence = Channel.from("ELBO", "KLpq-10")
   engines = Channel.from("physher")
 
-  ch_vb = coalescent.combine(divergence).combine(engines)
+  ch_vb = models.combine(coalescent).combine(divergence).combine(engines)
   RUN_TORCHTREE_HCV(ch_vb)
 
-  ch_hmc = coalescent.combine(engines)
+  TORCHTREE_SAMPLING(Channel.value("HCV"), RUN_TORCHTREE_HCV.out[0], RUN_TORCHTREE_HCV.out[1])
+
+  TORCHTREE_PARSE(Channel.value("HCV"), RUN_TORCHTREE_HCV.out[0], RUN_TORCHTREE_HCV.out[2])
+
+  ch_hmc = models.combine(coalescent).combine(engines)
   RUN_TORCHTREE_HMC(ch_hmc)
 
-  RUN_TORCHTREE_MCMC(ch_hmc)
+  ch_mcmc = ch_hmc.filter{it[1] != "skyglide"}
+  RUN_TORCHTREE_MCMC(ch_mcmc)
 
   coalescent | RUN_BEAST_HCV
 }

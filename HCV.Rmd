@@ -13,7 +13,6 @@ library(ggplot2)
 library(tidyr)
 library(dplyr)
 library(readr)
-library(scales) # to access break formatting functions
 library(knitr)
 library(zeallot)
 library(stringr)
@@ -32,19 +31,6 @@ source("R/renamer.R")
 
 
 ```{r}
-parse_iterations <- function(filename) {
-  v_log <- read_lines(filename)
-
-  for (i in length(v_log):1) {
-    a <- v_log[i] %>% str_split("\\s+")
-    if (length(a[[1]]) == 5) {
-      iterations <- as.numeric(a[[1]][2])
-      break
-    }
-  }
-  iterations
-}
-
 parse_beast <- function(log_file, model, burnin = 0.1) {
   df <- fread(log_file,
     sep = "\t",
@@ -190,7 +176,7 @@ params_id <- c(
 
 for (divergence in c("ELBO", "KLpq-10")) {
   d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
-  p <- file.path("results", "HCV", "piecewise-linear", divergence, "physher")
+  p <- file.path("results", "HCV", "torchtree", "GTR", "skyglide", divergence, "physher")
 
   time <- parse_time(file.path(p, "torchtree.log"))
 
@@ -243,36 +229,6 @@ for (divergence in c("ELBO", "KLpq-10")) {
     ) %>%
     bind_rows(cvs)
 }
-```
-
-```{r}
-df_m <- fread(file.path("HCV-ELBO-100", "means.csv"),
-  sep = ",",
-  data.table = FALSE
-)
-df_v <- fread(file.path("HCV-ELBO-100", "variances.csv"),
-  sep = ",",
-  data.table = FALSE
-)
-
-df_m <- myrename(df_m, df.rename) %>%
-  rename(state = sample) %>%
-  rename(all_of(lookup)) %>%
-  select(all_of(params_id), contains("popSize"))
-df_v <- myrename(df_v, df.rename) %>%
-  rename(state = sample) %>%
-  rename(all_of(lookup)) %>%
-  select(all_of(params_id), contains("popSize"))
-
-df <- sweep(sqrt(df_v) / df_m, 2, as.numeric(sqrt(df_v[nrow(df_v), ]) /
-  df_m[nrow(df_m), ]), "-")**2
-cvs_extended <- df %>%
-  mutate(
-    state = as.numeric(df_m$state),
-    program = "ELBO",
-    time = time_per_state * state
-  ) %>%
-  bind_rows(cvs)
 ```
 
 # Squared difference of coefficient of variation against time
@@ -337,22 +293,6 @@ reposition_legend(g, "center", panel = "panel-3-2")
 
 \newpage
 
-```{r}
-df2 <- cvs_extended %>% # filter(state > 100000) %>%
-  select(all_of(c(params_id, "state", "program", "time"))) %>%
-  gather("param", "CV", -state, -time, -program) # %>% filter(program != "BEAST")
-
-g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
-  my_theme +
-  geom_line() +
-  # geom_vline(xintercept=as.numeric(df.m$state)[1]) +
-  facet_wrap(~param, scales = "free") +
-  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
-
-reposition_legend(g, "center", panel = "panel-3-2")
-```
-\newpage
-
 # Squared difference of coefficient of variation against time (BEAST only)
 ```{r}
 df2 <- cvs %>%
@@ -411,10 +351,10 @@ probs <- rbind(probs, data$probs)
 times <- rbind(times, data$time)
 times <- times %>% mutate(program = "BEAST", divergence = NA, algorithm = "MCMC")
 
-for (model in c("piecewise-linear", "skygrid")) {
+for (model in c("skyglide", "skygrid")) {
   for (divergence in c("ELBO", "KLpq-10")) {
     for (program in c("physher")) {
-      path <- file.path("results", "HCV", model, divergence, program)
+      path <- file.path("results", "HCV", "torchtree", "GTR", model, divergence, program)
       df <- read.csv(file.path(path, "samples.csv"), sep = "\t")
       df <- myrename(df, df.rename)
 
@@ -427,16 +367,16 @@ for (model in c("piecewise-linear", "skygrid")) {
         400,
         age_of_youngest = 1994
       )
-      m <- if (model == "piecewise-linear") "skyglide" else model
+
       d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
 
-      label <- paste("torchtree", m, d, sep = "-")
+      label <- paste("torchtree", model, d, sep = "-")
 
       skys <- skygrid %>%
         mutate(
           label = label,
           divergence = d,
-          model = m,
+          model = model,
           program = program,
           algorithm = "VB",
         ) %>%
@@ -449,7 +389,7 @@ for (model in c("piecewise-linear", "skygrid")) {
           label = label,
           divergence = d,
           program = program,
-          model = m,
+          model = model,
           algorithm = "VB",
         ) %>%
         bind_rows(params)
@@ -462,18 +402,19 @@ for (model in c("piecewise-linear", "skygrid")) {
           label = label,
           divergence = d,
           program = program,
-          model = m,
+          model = model,
           algorithm = "VB",
         ) %>%
         bind_rows(probs)
 
-      iterations <- parse_iterations(file.path(path, "torchtree.txt"))
-      time <- parse_time(file.path(path, "torchtree.log"))
+      df_info <- read.csv(file.path(path, "info.csv"))
+      iterations <- df_info$iters[1]
+      time <- df_info$time[1]
 
       times <- data.frame(
         time = time,
         divergence = d,
-        model = m,
+        model = model,
         algorithm = "VB",
         program = program,
         iterations = iterations
@@ -486,14 +427,15 @@ skys <- skys %>% mutate_at(c("pop_size_low", "pop_size_high", "pop_size"), exp)
 ```
 
 ```{r}
-for (model in c("piecewise-linear", "skygrid")) {
-  m <- if (model == "piecewise-linear") "skyglide" else model
-  label <- paste("torchtree", m, "HMC", sep = "-")
+for (model in c("skyglide", "skygrid")) {
+  label <- paste("torchtree", model, "HMC", sep = "-")
 
   df <- read.csv(
     file.path(
       "results",
       "HCV",
+      "torchtree",
+      "GTR",
       model,
       "hmc",
       "physher",
@@ -514,7 +456,7 @@ for (model in c("piecewise-linear", "skygrid")) {
     mutate(
       label = label,
       divergence = NA,
-      model = m,
+      model = model,
       program = "torchtree",
       algorithm = "HMC"
     ) %>%
@@ -534,7 +476,7 @@ for (model in c("piecewise-linear", "skygrid")) {
       label = label,
       divergence = NA,
       program = "torchtree",
-      model = m
+      model = model
     )
 
   params <- df_hmc %>%
@@ -589,7 +531,7 @@ ggplot(params, aes(value, colour = label)) +
   my_theme + 
   geom_density() +
   facet_wrap(~param, scales = "free") +
-  labs(colour=NULL, x = "Value", y = "Density")
+  labs(colour = NULL, x = "Value", y = "Density")
 ```
 
 \newpage
@@ -600,32 +542,34 @@ ggplot(probs, aes(value, colour = label)) +
   my_theme + 
   geom_density() +
   facet_wrap(~param, scales = "free") +
-  labs(colour=NULL, x = "Value", y = "Density")
+  labs(colour = NULL, x = "Value", y = "Density")
 ```
 
 \newpage
 
 ```{r skyglide-params}
-df = params %>%
-  filter((model != "skygrid" | program =="BEAST") )#& algorithm != "HMC")
+df <- params %>%
+  filter((model != "skygrid" | program == "BEAST")) # & algorithm != "HMC")
 
-g = ggplot(df, aes(value, colour = label)) +
+g <- ggplot(df, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
-  labs(x = "Value", y = "Density", colour=NULL)
+  labs(x = "Value", y = "Density", colour = NULL)
 
-reposition_legend(g, 'center', panel='panel-3-2')
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
 
 \newpage
 
 # Skygrid and skyglide plots
 ```{r sky-plots}
-skys2 = skys %>% mutate(proghow = str_replace(label, "-skyg\\w+", ""),
-                       model = factor(model, levels=c("skygrid", "skyglide")),
-                       proghow = factor(proghow, levels = c("BEAST", "torchtree-ELBO", "torchtree-KL(p||q)", "torchtree-HMC")))
-skyplot(skys2, fill_by = "proghow", facet=list(rows="model", cols="proghow")) +
+skys2 <- skys %>% mutate(
+  proghow = str_replace(label, "-skyg\\w+", ""),
+  model = factor(model, levels = c("skygrid", "skyglide")),
+  proghow = factor(proghow, levels = c("BEAST", "torchtree-ELBO", "torchtree-KL(p||q)", "torchtree-HMC"))
+)
+skyplot(skys2, fill_by = "proghow", facet = list(rows = "model", cols = "proghow")) +
   theme(legend.position = "none")
 ```
 
@@ -633,7 +577,17 @@ skyplot(skys2, fill_by = "proghow", facet=list(rows="model", cols="proghow")) +
 
 # Speed table
 ```{r}
-grids_info = read.csv(file.path("results", "HCV", "info.csv"))
-kable(grids_info)
+infos <- NULL
+for (coalescent in c("skyglide", "skygrid")) {
+  for (divergence in c("ELBO", "KLpq-10")) {
+    for (engine in c("physher", "torchtree")) {
+      path <- file.path("results", "HCV", "torchtree", "GTR", coalescent, divergence, engine)
+      if (file.exists(path)) {
+        info <- read.csv(file.path(path, "info.csv"))
+        infos <- rbind(infos, info)
+      }
+    }
+  }
+}
+kable(infos)
 ```
-
