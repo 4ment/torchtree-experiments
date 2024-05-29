@@ -50,6 +50,8 @@ extra_prior <- log(dexp(0, 0.3333333333333)) + # clock.scale.prior
   log(dlnorm(8.0E-4, log(8.0E-4), 1.17481)) + # clock.location.prior
   log(dlnorm2(1, 1, 1)) * (583 * 2 - 2) + # ratesPrior
   -6 * log(6) # subst rates sum to 6
+
+cbbPalette <- c("#000000", "#0072B2", "#D55E00")
 ```
 
 
@@ -88,8 +90,8 @@ gtr_rates <- df_beast_gtr %>%
     ~ . / norm
   ) %>%
   select(!starts_with("freq"), -rateSum, -norm) %>%
-  mutate(type = "BEAST", model = "GTR") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "GTR", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 
 gtr_probs <- df_beast_gtr %>%
@@ -99,8 +101,8 @@ gtr_probs <- df_beast_gtr %>%
   rename(
     coalescent = "skygrid"
   ) %>%
-  mutate(type = "BEAST", model = "GTR") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "GTR", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 gtr_other <- df_beast_gtr %>%
   select(
@@ -112,8 +114,8 @@ gtr_other <- df_beast_gtr %>%
   rename(
     rootHeight = "treeModel.rootHeight"
   ) %>%
-  mutate(type = "BEAST", model = "GTR") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "GTR", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 t_lookup_gtr <- c(
   AC = "substmodel.rates.0", AG = "substmodel.rates.1", AT = "substmodel.rates.2",
@@ -123,8 +125,10 @@ t_lookup_gtr <- c(
 gtr_thetas <- df_beast_gtr %>%
   select(starts_with("skygrid.log"), skygrid.precision) %>%
   rename_with(~ str_replace(., "skygrid.", "")) %>%
-  mutate(type = "BEAST", model = "GTR") %>%
-  gather("param", "value", -type, -model)
+  rename_with(~ str_replace(., "logPopSize", "log population size ")) %>%
+  rename(all_of(c("GMRF precision" = "precision"))) %>%
+  mutate(type = "BEAST", model = "GTR", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 for (divergence in c("ELBO", "KLpq-10")) {
   d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
@@ -151,8 +155,8 @@ for (divergence in c("ELBO", "KLpq-10")) {
       ~ . / norm
     ) %>%
     select(-norm) %>%
-    mutate(type = d, model = "GTR") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "GTR", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(gtr_rates)
 
   gtr_probs <- df_t_gtr %>%
@@ -161,8 +165,8 @@ for (divergence in c("ELBO", "KLpq-10")) {
     ) %>%
     rename(likelihood = like) %>%
     mutate(prior = prior + extra_prior) %>%
-    mutate(type = d, model = "GTR") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "GTR", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(gtr_probs)
 
   gtr_other <- df_t_gtr %>%
@@ -175,21 +179,22 @@ for (divergence in c("ELBO", "KLpq-10")) {
       alpha = "sitemodel.shape.0",
       rootHeight = "tree.root_height.0"
     ))) %>%
-    mutate(type = d, model = "GTR") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "GTR", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(gtr_other)
 
   gtr_thetas <- df_t_gtr %>%
     select(starts_with("coalescent.theta"), gmrf.precision.0) %>%
     mutate(across(starts_with("coalescent.theta"), log)) %>%
     rename(
-      precision = gmrf.precision.0,
       logPopSize1 = coalescent.theta.0, logPopSize2 = coalescent.theta.1,
       logPopSize3 = coalescent.theta.2, logPopSize4 = coalescent.theta.3,
       logPopSize5 = coalescent.theta.4
     ) %>%
-    mutate(type = d, model = "GTR") %>%
-    gather("param", "value", -type, -model) %>%
+    rename_with(~ str_replace(., "logPopSize", "log population size ")) %>%
+    rename(all_of(c("GMRF precision" = "gmrf.precision.0"))) %>%
+    mutate(type = d, model = "GTR", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(gtr_thetas)
 }
 ```
@@ -198,21 +203,41 @@ for (divergence in c("ELBO", "KLpq-10")) {
 
 ## Probs
 ```{r gtr-probs}
-ggplot(gtr_probs, aes(value, group = type, colour = type)) +
+ggplot(gtr_probs, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 ```
 
 \newpage
 
-## Substitution parameters
-```{r gtr-other}
-g <- ggplot(gtr_other, aes(value, colour = type)) +
+## Tree likelihood parameters
+```{r gtr-params}
+human_readable_labeller <- function(x) {
+  human_readable_labels <- expression(
+    AC = "A" %<->% "C relative rate",
+    AG = "A" %<->% "G relative rate",
+    AT = "A" %<->% "T relative rate",
+    CG = "C" %<->% "G relative rate",
+    CT = "C" %<->% "T relative rate",
+    GT = "G" %<->% "T relative rate",
+    rootHeight = "root height",
+    alpha = "rate variation shape"
+  )
+  list(as.list(human_readable_labels)[x$param])
+}
+
+gtr_other$param <- factor(gtr_other$param,
+  levels = c("AC", "AG", "AT", "CG", "CT", "GT", "alpha", "rootHeight")
+)
+
+g <- ggplot(gtr_other, aes(value, colour = label)) +
   my_theme +
   geom_density() +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 
 reposition_legend(g, "center", panel = "panel-3-3")
@@ -222,10 +247,11 @@ reposition_legend(g, "center", panel = "panel-3-3")
 
 ## Coalescent
 ```{r gtr-coalescent}
-ggplot(gtr_thetas, aes(value, group = type, colour = type)) +
+ggplot(gtr_thetas, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 ```
 
@@ -237,12 +263,7 @@ df <- df_beast_gtr %>%
     rootHeight = "treeModel.rootHeight"
   ) %>%
   select(starts_with("skygrid.log"), rootHeight, state) %>%
-  rename(
-    logPopSize1 = skygrid.logPopSize1, logPopSize2 = skygrid.logPopSize2,
-    logPopSize3 = skygrid.logPopSize3, logPopSize4 = skygrid.logPopSize4,
-    logPopSize5 = skygrid.logPopSize5
-  ) %>%
-  # mutate_at(vars(starts_with("theta")), exp) %>%
+  rename_with(~ str_replace(., "skygrid.", "")) %>%
   gather("param", "value", -state)
 
 ggplot(df, aes(x = state, y = value)) +
@@ -279,8 +300,8 @@ names(lookup) <- c("AC", "AG", "AT", "CG", "CT", "GT", "CA", "GA", "TA", "GC", "
 
 coefs <- beast_coefs %>%
   rename(all_of(lookup)) %>%
-  mutate(type = "BEAST", model = "HKY-RE") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "HKY-RE", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 hky_other <- df_beast %>%
   select(all_of(
@@ -292,15 +313,19 @@ hky_other <- df_beast %>%
       "skygrid.precision"
     )
   )) %>%
+  mutate(kappa = exp(log.kappa)) %>%
+  select(-log.kappa) %>%
   rename(all_of(
     c(
-      globalScale = "randomEffects.globalScale",
-      rootHeight = "treeModel.rootHeight",
-      precision = "skygrid.precision"
+      "rate variation shape" = "alpha",
+      "Bayesian bridge scale" = "randomEffects.globalScale",
+      "root height" = "treeModel.rootHeight",
+      "GMRF precision" = "skygrid.precision",
+      "HKY kappa" = "kappa"
     )
   )) %>%
-  mutate(type = "BEAST", model = "HKY-RE") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "HKY-RE", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 hky_probs <- df_beast %>%
   select(all_of(
@@ -312,8 +337,8 @@ hky_probs <- df_beast %>%
   rename(all_of(
     c(coalescent = "skygrid")
   )) %>%
-  mutate(type = "BEAST", model = "HKY-RE") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "HKY-RE", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 lookup <- setNames(
   c("log.kappa", sapply(1:12, function(x) {
@@ -346,14 +371,14 @@ hky_rates <- df_beast %>%
     ~ . / norm
   ) %>%
   select(-c(kappa, norm)) %>%
-  mutate(type = "BEAST", model = "HKY-RE") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "HKY-RE", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 hky_thetas <- df_beast %>%
   select(starts_with("skygrid.log"), skygrid.precision) %>%
   rename_with(~ str_replace(., "skygrid.", "")) %>%
-  mutate(type = "BEAST", model = "HKY-RE") %>%
-  gather("param", "value", -type, -model)
+  mutate(type = "BEAST", model = "HKY-RE", label = "BEAST MCMC") %>%
+  gather("param", "value", -type, -model, -label)
 
 for (divergence in c("ELBO", "KLpq-10")) {
   d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
@@ -369,8 +394,8 @@ for (divergence in c("ELBO", "KLpq-10")) {
 
   coefs <- t_coefs %>%
     rename(all_of(lookup)) %>%
-    mutate(type = d, model = "HKY-RE") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "HKY-RE", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(coefs)
 
   hky_other <- df_t %>%
@@ -381,17 +406,19 @@ for (divergence in c("ELBO", "KLpq-10")) {
       tree.root_height.0,
       gmrf.precision.0
     ) %>%
+    mutate(kappa = exp(substmodel.kappa.unres.0)) %>%
+    select(-substmodel.kappa.unres.0) %>%
     rename(all_of(
       c(
-        globalScale = "bayesian.bridge.scale.0",
-        alpha = "sitemodel.shape.0",
-        log.kappa = "substmodel.kappa.unres.0",
-        rootHeight = "tree.root_height.0",
-        precision = "gmrf.precision.0"
+        "Bayesian bridge scale" = "bayesian.bridge.scale.0",
+        "rate variation shape" = "sitemodel.shape.0",
+        "HKY kappa" = "kappa",
+        "root height" = "tree.root_height.0",
+        "GMRF precision" = "gmrf.precision.0"
       )
     )) %>%
-    mutate(type = d, model = "HKY-RE") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "HKY-RE", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(hky_other)
 
   hky_probs <- df_t %>%
@@ -404,8 +431,8 @@ for (divergence in c("ELBO", "KLpq-10")) {
         likelihood = "like"
       )
     )) %>%
-    mutate(type = d, model = "HKY-RE") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "HKY-RE", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(hky_probs)
 
   lookup <- sapply(0:11, function(x) {
@@ -437,21 +464,22 @@ for (divergence in c("ELBO", "KLpq-10")) {
       ~ . / norm
     ) %>%
     select(-norm) %>%
-    mutate(type = d, model = "HKY-RE") %>%
-    gather("param", "value", -type, -model) %>%
+    mutate(type = d, model = "HKY-RE", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(hky_rates)
 
   hky_thetas <- df_t %>%
     select(starts_with("coalescent.theta"), gmrf.precision.0) %>%
     mutate(across(starts_with("coalescent.theta"), log)) %>%
     rename(
-      precision = gmrf.precision.0,
       logPopSize1 = coalescent.theta.0, logPopSize2 = coalescent.theta.1,
       logPopSize3 = coalescent.theta.2, logPopSize4 = coalescent.theta.3,
       logPopSize5 = coalescent.theta.4
     ) %>%
-    mutate(type = d, model = "HKY-RE") %>%
-    gather("param", "value", -type, -model) %>%
+    rename_with(~ str_replace(., "logPopSize", "log population size ")) %>%
+    rename(all_of(c("GMRF precision" = "gmrf.precision.0"))) %>%
+    mutate(type = d, model = "HKY-RE", label = paste("torchtree", d)) %>%
+    gather("param", "value", -type, -model, -label) %>%
     bind_rows(gtr_thetas)
 }
 ```
@@ -460,11 +488,24 @@ for (divergence in c("ELBO", "KLpq-10")) {
 
 ## Random effects ($\epsilon$)
 ```{r hkyre-coefs}
-ggplot(coefs, aes(value, group = type, colour = type)) +
+human_readable_labeller <- function(x) {
+  human_readable_labels <- expression(
+    AC = "A" %->% "C", CA = "C" %->% "A",
+    AG = "A" %->% "G", GA = "G" %->% "A",
+    AT = "A" %->% "T", TA = "T" %->% "A",
+    CG = "C" %->% "G", GC = "G" %->% "C",
+    CT = "C" %->% "T", TC = "T" %->% "C",
+    GT = "G" %->% "T", TG = "T" %->% "G"
+  )
+  list(as.list(human_readable_labels)[x$param])
+}
+
+ggplot(coefs, aes(value, colour = label)) +
   my_theme +
   geom_density(bw = 0.2) +
   geom_vline(xintercept = 0) +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 ```
 
@@ -472,10 +513,11 @@ ggplot(coefs, aes(value, group = type, colour = type)) +
 
 ## Probs
 ```{r hkre-probs}
-ggplot(hky_probs, aes(value, group = type, colour = type)) +
+ggplot(hky_probs, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 ```
 
@@ -483,20 +525,28 @@ ggplot(hky_probs, aes(value, group = type, colour = type)) +
 
 ## Coalescent
 ```{r hkyre-coalescent}
-ggplot(hky_thetas, aes(value, group = type, colour = type)) +
+ggplot(hky_thetas, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 ```
 
 \newpage
-## Other parameters
-```{r hkyre-other}
-g <- ggplot(hky_other, aes(value, group = type, colour = type)) +
+## Tree likelihood parameters
+```{r hkyre-params}
+human_readable_labeller <- function(x) {
+  human_readable_labels <- x$param
+  human_readable_labels[which(x$param == "HKY kappa")] <- expression(paste("HKY ", kappa))
+  list(as.list(human_readable_labels))
+}
+
+g <- ggplot(hky_other, aes(value, colour = label)) +
   my_theme +
   geom_density() +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  scale_color_manual(values = cbbPalette) +
   labs(colour = NULL, x = "Value", y = "Density")
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -534,6 +584,15 @@ df <- gtr_rates %>%
   filter(type != "KL(p||q)") %>%
   mutate(what = paste(model, type, sep = "-"))
 df <- df %>% left_join(temp, by = join_by(param))
+
+df[c("i", "j")] <- str_split_fixed(df$param, "", 2)
+# generate warning in pdf and replace arrow with ..
+df$formatted <- paste(df$i, "\u2192", df$j)
+
+# does not work
+# df$formatted <- sapply(1:nrow(df), function(ii) {
+#   bquote(.(df$i[ii]) %->% .(df$j[ii]))
+# })
 
 ggplot(df, aes(value, param, color = what, fill = what)) +
   theme_bw() +
@@ -653,12 +712,6 @@ kable(df)
 plot(seq(0, 1000000, 1), prior.tau.0(seq(0, 1000000, 1)))
 ```
 
-# Speed
-```{r}
-grids_info <- read.csv(file.path("results", "SC2", "info.csv"))
-kable(grids_info)
-```
-
 \newpage
 
 # Convergence
@@ -684,29 +737,30 @@ lookup <- c(
   }),
   "treeModel.rootHeight",
   "skygrid.precision",
-  "alpha"
+  "alpha",
+  "randomEffects.globalScale"
 )
 names(lookup) <- c(
   sapply(1:5, function(x) {
-  paste0("popSize", x)
+    paste0("population size ", x)
   }),
   c("reAC", "reAG", "reAT", "reCG", "reCT", "reGT", "reCA", "reGA", "reTA", "reGC", "reTC", "reTG"),
-  "rootHeight", "precision", "shape"
+  "root height", "GMRF precision", "rate variation shape", "Bayesian bridge scale"
 )
 
 params_id <- c(
-  "rootHeight",
+  "root height",
   "kappa",
-  "shape",
-  "precision",
-  "state"
+  "rate variation shape",
+  "GMRF precision",
+  "Bayesian bridge scale"
 )
 df <- df %>%
   mutate(kappa = exp(log.kappa)) %>%
   rename(all_of(lookup)) %>%
-  select(all_of(params_id), contains("popSize"), starts_with("re"))
+  select(state, all_of(params_id), contains("population"), starts_with("re"))
 
-vars <- cvs <- means <- df[FALSE, ]
+vars <- cvs <- means <- means2 <- df[FALSE, ]
 var0 <- summarize_all(df, var)
 sd0 <- sqrt(var0)
 mean0 <- summarize_all(df, mean)
@@ -725,14 +779,34 @@ for (i in 1:replicates) {
   vars <- bind_rows(vars, (df2_var - var0)**2)
   cvs <- bind_rows(cvs, (df2_cv - cv0)**2)
   means <- bind_rows(means, (df2_mean - mean0)**2)
+  means2 <- bind_rows(means2, df2_mean)
 }
 
 vars$state <- seq(1, (replicates - 1) * every, every) * 500
 cvs$state <- vars$state
 means$state <- vars$state
-vars <- vars %>% mutate(time = beast_time / state_count * state, program = "BEAST")
-cvs <- cvs %>% mutate(time = beast_time / state_count * state, program = "BEAST")
-means <- means %>% mutate(time = beast_time / state_count * state, program = "BEAST")
+means2$state <- vars$state
+
+vars <- vars %>%
+  mutate(
+    time = beast_time / state_count * state, program = "BEAST",
+    label = "BEAST MCMC", divergence = NA
+  )
+cvs <- cvs %>%
+  mutate(
+    time = beast_time / state_count * state, program = "BEAST",
+    label = "BEAST MCMC", divergence = NA
+  )
+means <- means %>%
+  mutate(
+    time = beast_time / state_count * state, program = "BEAST",
+    label = "BEAST MCMC", divergence = NA
+  )
+means2 <- means2 %>%
+  mutate(
+    time = beast_time / state_count * state, program = "BEAST",
+    label = "BEAST MCMC", divergence = NA
+  )
 ```
 
 ```{r}
@@ -743,18 +817,22 @@ lookup <- c(sapply(0:4, function(x) {
 }))
 names(lookup) <- c(
   sapply(1:5, function(x) {
-  paste0("popSize", x)
+    paste0("population size ", x)
   }),
-  c("reAC", "reAG", "reAT", "reCG", "reCT", "reGT", "reCA", "reGA", "reTA", "reGC", "reTC", "reTG")
+  c(
+    "reAC", "reAG", "reAT", "reCG", "reCT", "reGT",
+    "reCA", "reGA", "reTA", "reGC", "reTC", "reTG"
+  )
 )
 
 lookup <- c(
   lookup,
-  rootHeight = "tree.root_height.0",
-  precision = "gmrf.precision.0",
-  kappa = "substmodel.kappa.0",
-  shape = "sitemodel.shape.0",
-  likelihood = "like"
+  "root height" = "tree.root_height.0",
+  "GMRF precision" = "gmrf.precision.0",
+  log.kappa = "substmodel.kappa.unres.0",
+  "rate variation shape" = "sitemodel.shape.0",
+  likelihood = "like",
+  "Bayesian bridge scale" = "bayesian.bridge.scale.0"
 )
 
 for (divergence in c("ELBO", "KLpq-10")) {
@@ -780,21 +858,35 @@ for (divergence in c("ELBO", "KLpq-10")) {
   )
 
   params_id <- c(
-    "rootHeight",
-    # "likelihood",
+    "root height",
     "kappa",
-    "shape",
-    "precision",
-    "state"
+    "rate variation shape",
+    "GMRF precision",
+    "Bayesian bridge scale"
   )
+
+  df_means2 <- df_m %>%
+    rename(state = sample) %>%
+    rename(any_of(lookup)) %>%
+    mutate(kappa = exp(log.kappa)) %>%
+    select(state, all_of(params_id), starts_with("population"), starts_with("re"))
+
   df_m <- df_m %>%
     rename(state = sample) %>%
     rename(any_of(lookup)) %>%
-    select(all_of(params_id), contains("popSize"), starts_with("re"))
+    mutate("kappa" = exp(log.kappa)) %>%
+    select(state, all_of(params_id), starts_with("population"), starts_with("re")) %>%
+    mutate(across(c(all_of(params_id), starts_with("population"), starts_with("re")), cummean))
+  # mutate(across(everything(), cummean))
+
   df_v <- df_v %>%
     rename(state = sample) %>%
     rename(any_of(lookup)) %>%
-    select(all_of(params_id), contains("popSize"), starts_with("re"))
+    mutate(kappa = exp(log.kappa)) %>%
+    select(state, all_of(params_id), starts_with("population"), starts_with("re")) %>%
+    mutate(across(c(all_of(params_id), starts_with("population"), starts_with("re")), cummean))
+  # mutate(across(everything(), cummean))
+
   d <- if (divergence == "KLpq-10") {
     "KL(p||q)"
   } else {
@@ -810,26 +902,42 @@ for (divergence in c("ELBO", "KLpq-10")) {
     df_v <- df_v[1:index, ]
     iter <- as.numeric(df_m$state)
     time <- time / total_iter * iter[length(iter)]
+    df_means2 <- df_means2[1:index, ]
   }
 
+  means2 <- df_means2 %>%
+    mutate(
+      program = "torchtree",
+      divergence = d,
+      label = paste("torchtree", d),
+      time = time / iter[length(iter)] * state
+    ) %>%
+    bind_rows(means2)
 
   df_m2 <- sweep(df_m, 2, as.numeric(df_m[nrow(df_m), ]), "-")**2
   df_m2 <- df_m2 %>% mutate(
     state = iter,
-    program = d,
+    program = "torchtree",
+    divergence = d,
+    label = paste("torchtree", d),
     time = time / iter[length(iter)] * state
   )
   df_v2 <- sweep(df_v, 2, as.numeric(df_v[nrow(df_v), ]), "-")**2
   df_v2 <- df_v2 %>% mutate(
     state = iter,
-    program = d,
+    program = "torchtree",
+    divergence = d,
+    label = paste("torchtree", d),
     time = time / iter[length(iter)] * state
   )
+
   df_cv2 <- sweep(sqrt(df_v) / df_m, 2, as.numeric(sqrt(df_v[nrow(df_v), ]) /
     df_m[nrow(df_m), ]), "-")**2
   df_cv2 <- df_cv2 %>% mutate(
     state = iter,
-    program = d,
+    program = "torchtree",
+    divergence = d,
+    label = paste("torchtree", d),
     time = time / iter[length(iter)] * state
   )
 
@@ -841,30 +949,66 @@ for (divergence in c("ELBO", "KLpq-10")) {
 
 \newpage
 
-```{r hkyre-cv-other}
-df2 <- cvs %>%
+```{r hkyre-means-params}
+df2 <- means2 %>%
   # filter(time < 2000) %>%
-  select(all_of(c(params_id, "state", "program", "time"))) %>%
-  gather("param", "CV", -state, -time, -program)
+  select(all_of(c(params_id, "state", "program", "time", "divergence", "label"))) %>%
+  gather("param", "mean", -state, -time, -program, -divergence, -label)
 
-ggplot(df2, aes(x = time, y = CV, color = program)) +
+human_readable_labeller <- function(x) {
+  human_readable_labels <- x$param
+  human_readable_labels[which(x$param == "kappa")] <- expression(paste("HKY ", kappa))
+  list(as.list(human_readable_labels))
+}
+
+g <- ggplot(df2, aes(x = time, y = mean, color = label)) +
   my_theme +
   geom_line() +
-  facet_wrap(~param, scales = "free") +
-  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+  scale_color_manual(values = cbbPalette) +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller)
+
+reposition_legend(g, "center", panel = "panel-3-2")
 ```
+
+\newpage
+
+```{r hkyre-cv-params}
+df2 <- cvs %>%
+  # filter(time < 2000) %>%
+  select(all_of(c(params_id, "state", "program", "time", "divergence", "label"))) %>%
+  gather("param", "CV", -state, -time, -program, -divergence, -label)
+
+human_readable_labeller <- function(x) {
+  human_readable_labels <- x$param
+  human_readable_labels[which(x$param == "kappa")] <- expression(paste("HKY ", kappa))
+  list(as.list(human_readable_labels))
+}
+
+g <- ggplot(df2, aes(x = time, y = CV, color = label)) +
+  my_theme +
+  geom_line() +
+  # scale_y_continuous(trans = "log10") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  scale_color_manual(values = cbbPalette) +
+  labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
+# labs(x = "Time (minutes)", y = bquote((sum(CV[j], j==1,i)/i - bar(CV)[M])^2), color = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+
 \newpage
 
 ```{r hkyre-cv-coalescent}
 df2 <- cvs %>%
   # filter(time < 2000) %>%
-  select(contains("pop"), state, time, program) %>%
-  gather("param", "CV", -state, -time, -program)
+  select(contains("pop"), state, time, program, divergence, label) %>%
+  gather("param", "CV", -state, -time, -program, -divergence, -label)
 
-g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
+g <- ggplot(df2, aes(x = time, y = CV, color = label)) +
   my_theme +
   geom_line() +
   facet_wrap(~param, scales = "free") +
+  scale_color_manual(values = cbbPalette) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -875,16 +1019,32 @@ reposition_legend(g, "center", panel = "panel-3-2")
 ```{r hkyre-cv-coefs}
 df2 <- cvs %>%
   # filter(time < 2000) %>%
-  select(starts_with("re"), all_of(c("state", "program", "time"))) %>%
-  gather("param", "CV", -state, -time, -program) %>%
+  select(starts_with("re"), all_of(c("state", "program", "time", "divergence", "label"))) %>%
+  gather("param", "CV", -state, -time, -program, -divergence, -label) %>%
   filter(!is.nan(CV)) %>%
-  mutate(param = factor(param, levels = c("reAC", "reAG", "reAT", "reCG", "reCT", "reGT", "reCA", "reGA", "reTA", "reGC", "reTC", "reTG")))
+  mutate(param = factor(param, levels = c(
+    "reAC", "reAG", "reAT", "reCG", "reCT", "reGT",
+    "reCA", "reGA", "reTA", "reGC", "reTC", "reTG"
+  )))
 
-ggplot(df2, aes(x = time, y = CV, color = program)) +
+human_readable_labeller <- function(x) {
+  human_readable_labels <- expression(
+    reAC = "A" %->% "C", reCA = "C" %->% "A",
+    reAG = "A" %->% "G", reGA = "G" %->% "A",
+    reAT = "A" %->% "T", reTA = "T" %->% "A",
+    reCG = "C" %->% "G", reGC = "G" %->% "C",
+    reCT = "C" %->% "T", reTC = "T" %->% "C",
+    reGT = "G" %->% "T", reTG = "T" %->% "G"
+  )
+  list(as.list(human_readable_labels)[x$param])
+}
+
+ggplot(df2, aes(x = time, y = CV, color = label)) +
   my_theme +
   geom_line() +
   scale_y_continuous(trans = "log10") +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  scale_color_manual(values = cbbPalette) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 ```
 
@@ -920,10 +1080,18 @@ ggplot(df_elbos %>% filter(iteration > 100000), aes(x = iteration, y = ELBO, col
 # Speed table
 ```{r}
 infos <- NULL
+for (model in c("HKY-RE", "GTR")) {
+  path <- file.path("results", "SC2", "beast", model, "skyglide")
+  t <- parse_time(file.path(path, "beast.log"))
+  info <- data.frame(
+    dataset = "SC2", model = model, engine = "BEAST",
+    time = t, divergence = "", iters = 50000000, elbo = "",
+    coalescent = "skyglide"
+  )
+  infos <- rbind(infos, info)
 
-for (divergence in c("ELBO", "KLpq-10")) {
-  for (engine in c("physher", "torchtree")) {
-    for (model in c("HKY-RE", "GTR")) {
+  for (divergence in c("ELBO", "KLpq-10")) {
+    for (engine in c("physher", "torchtree")) {
       path <- file.path("results", "SC2", "torchtree", model, "skyglide", divergence, engine)
       if (file.exists(path)) {
         info <- read.csv(file.path(path, "info.csv"))
@@ -932,6 +1100,11 @@ for (divergence in c("ELBO", "KLpq-10")) {
     }
   }
 }
-
+infos <- mutate(infos, "time (hours)" = time / 24, "hours/million" = time / iters * 1e6 / 24) %>%
+  select(-dataset, -coalescent) %>%
+  mutate(program = ifelse(engine == "BEAST", "BEAST", "torchtree")) %>%
+  mutate(engine = ifelse(engine == "BEAST", "MCMC", engine)) %>%
+  mutate(engine = ifelse(engine == "torchtree", "AD", engine)) %>%
+  select(program, model, engine, divergence, `time (hours)`, iters, `hours/million`, elbo)
 kable(infos)
 ```

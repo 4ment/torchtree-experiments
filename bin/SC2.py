@@ -12,6 +12,7 @@ import click
 # --coalescent_init constant --tol_rel_obj 0 --iter 1000000 \
 # --checkpoint_all
 
+
 def read_fasta(alignment):
     sequence = None
     name = None
@@ -34,16 +35,28 @@ def read_fasta(alignment):
 @click.option("--output", type=click.File("w"), required=True, help="output json file")
 @click.option("--alignment", type=click.File("r"), required=True, help="fasta file")
 @click.option(
+    "--iter",
+    type=int,
+    default=1000000,
+    show_default=True,
+    help="number of iterations",
+)
+@click.option(
     "--engine",
     type=click.Choice(["torchtree", "physher"]),
     default="torchtree",
+    show_default=True,
     help="engine",
 )
-def torchtree(file, output, alignment, engine):
+def torchtree(file, output, alignment, iter, engine):
     sequences = read_fasta(alignment)
     data = json.load(file)
     for sequence in data[1]["sequences"]:
         sequence["sequence"] = sequences[sequence["taxon"]]
+
+    advi = findInDictByID(data, "advi")
+    advi["iterations"] = iter
+    advi["convergence"]["max_iterations"] = iter
 
     if engine == "physher":
         like = findInDictByID(data, "like")

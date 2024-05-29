@@ -1,11 +1,13 @@
-name: torchtree
+name: torchtree-experiments
 channels:
   - bioconda
   - pytorch
 dependencies:
   - click
+  - gsl
   - iqtree=2.2.6
-  - lsd=2.2.3
+  # - lsd=2.2.3 # not the lsd you are looking for
   - nextflow
   - pandas
+  - pandoc
   - pytorch>=1.9

@@ -24,8 +24,8 @@ RUN git -C /beagle-lib checkout hmc-clock
 RUN cmake -S /beagle-lib/ -B /beagle-lib/build -DBUILD_CUDA=OFF -DBUILD_OPENCL=OFF
 RUN cmake --build beagle-lib/build/ --target install
 
-RUN git clone https://github.com/beast-dev/beast-mcmc.git /beast-mcmc
-RUN cd /beast-mcmc && git checkout hmc-clock && ant linux
+RUN git clone https://github.com/4ment/beast-mcmc.git /beast-mcmc
+RUN cd /beast-mcmc && git checkout torchtree-experiments && ant linux
 RUN chmod +x /beast-mcmc/release/Linux/BEASTv1.10.5pre/bin/beast \
 	&& ln -s /beast-mcmc/release/Linux/BEASTv1.10.5pre/bin/beast /usr/local/bin/
 
@@ -51,5 +51,4 @@ ENV LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib
 RUN git clone https://github.com/4ment/torchtree-physher /torchtree-physher
 RUN pip install /torchtree-physher
 
-RUN git clone https://github.com/4ment/torchtree-scipy /torchtree-scipy
-RUN pip install /torchtree-scipy
+RUN pip install torchtree-scipy=1.0.0

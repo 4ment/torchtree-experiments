@@ -25,16 +25,22 @@ To execute this pipeline, it is necessary to install [nextflow](https://www.next
 
 ### Installing dependencies with conda
     conda env create -f environment.yml
+    conda activate torchtree-experiments
+
+    git clone https://github.com/4ment/physher
+    cmake -S physher/ -B physher/build -DBUILD_CPP_WRAPPER=on -DBUILD_TESTING=on -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX/envs/torchtree-experiments
+    cmake --build physher/build/ --target install
+    export LIBRARY_PATH=$LIBRARY_PATH:$CONDA_PREFIX/envs/torchtree-experiments/lib
+
     git clone http://github.com/4ment/torchtree.git
     pip install torchtree/
     git clone http://github.com/4ment/torchtree-physher.git
     pip install torchtree-physher/
-    git clone http://github.com/4ment/torchtree-scipy.git
-    pip install torchtree-scipy/
+    pip install torchtree-scipy=1.0.0
 
 ### Running the pipeline
 
-    nextflow run main.nf --sc2 sc2.fa
+    nextflow run main.nf -profile conda --sc2 sc2.fa
 
 `sc2.fa` is the sequence alignment file containing the SARS-CoV-2 sequences (see [SARS-CoV-2](#sars-cov-2) section for more details)
 
@@ -53,17 +59,23 @@ Since the pipeline will take weeks to run to completion one should use a high pe
 
 ## Summarizing results
 
-Install [skyplotr](https://github.com/4ment/skyplotr) package using [devtools](https://github.com/hadley/devtools):
+All R packages used for plotting the results can be installed using renv. This command needs to be run only once.
 
-    Rscript -e 'devtools::install_github("4ment/skyplotr")'
+    Rscript -e 'renv::restore()'
 
 Generate figures in a single pdf:
 
     Rscript -e 'rmarkdown::render("index.Rmd")'
 
+Note:
+
+rmarkdown requires pandoc to be installed. The conda environment provided in this repo include pandoc.
+It is also possible to use RStudio to run the `index.Rmd` script.
+
+
 ## Program and library versions
 
-For reproducbility, we provide below the version of each library/program used in the benchmark.
+For reproducibility, we provide below the version of each library/program used in the benchmark.
 
 | Program/Library | Version |
 | --------------- | ------- |
@@ -74,9 +86,15 @@ For reproducbility, we provide below the version of each library/program used in
 | [pytorch]           | 1.12.1 |
 
 
+The R scripts use the [skyplotr] package, and it is downloadable using [devtools](https://github.com/hadley/devtools):
+
+    Rscript -e 'devtools::install_github("4ment/skyplotr", ref="8abc10a")'
+
+
 [physher]: https://github.com/4ment/physher
 [torchtree]: https://github.com/4ment/torchtree
 [torchtree-physher]: https://github.com/4ment/torchtree-physher
 [torchtree-scipy]: https://github.com/4ment/torchtree-scipy
+[skyplotr]: https://github.com/4ment/skyplotr
 
 [PyTorch]: https://pytorch.org

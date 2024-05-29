@@ -52,12 +52,13 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
     algorithm = "MCMC",
     model = model,
     program = "BEAST",
-    label = paste0("BEAST-", model)
+    label = paste0("BEAST-", model),
+    label2 = "BEAST MCMC"
   )
 
   row_sum <- as.numeric(rowSums(select(df, AC, AG, AT, CG, CT, GT)))
   df_params <- df %>%
-    mutate_at(c("AC", "AG", "AT", "CG", "CT", "GT"), ~ . / row_sum) %>%
+    mutate(across(c("AC", "AG", "AT", "CG", "CT", "GT"), ~ . / row_sum)) %>%
     select(rootHeight, precision, freqA, AC, shape) %>%
     gather("param", "value") %>%
     mutate(
@@ -65,7 +66,8 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
       algorithm = "MCMC",
       model = model,
       program = "BEAST",
-      label = paste0("BEAST-", model)
+      label = paste0("BEAST-", model),
+      label2 = "BEAST MCMC"
     )
 
   df_probs <- df %>%
@@ -76,7 +78,8 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
       algorithm = "MCMC",
       model = model,
       program = "BEAST",
-      label = paste0("BEAST-", model)
+      label = paste0("BEAST-", model),
+      label2 = "BEAST MCMC"
     )
 
   time <- parse_time(file.path(dirname(log_file), "beast.log"))
@@ -93,6 +96,18 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
     sky = sky,
     time = time
   )
+}
+
+human_readable_labels <- expression(
+  AC = "A" %<->% "C relative rate",
+  rootHeight = "root height",
+  precision = "GMRF precision",
+  shape = "rate variation shape",
+  freqA = pi["A"]
+)
+
+human_readable_labeller <- function(x) {
+  list(as.list(human_readable_labels)[x$param])
 }
 ```
 
@@ -117,12 +132,11 @@ params_id <- c(
   "freqA",
   "AC",
   "shape",
-  "precision",
-  "state"
+  "precision"
 )
 df <- myrename(df, df.rename.beast) %>%
   rename(all_of(lookup)) %>%
-  select(all_of(params_id), contains("popSize"))
+  select(all_of(params_id), contains("popSize"), "state")
 
 vars <- cvs <- means <- df[FALSE, ]
 var0 <- summarize_all(df, var)
@@ -165,14 +179,6 @@ lookup <- sapply(0:74, function(x) {
 names(lookup) <- sapply(1:75, function(x) {
   paste0("popSize", x)
 })
-params_id <- c(
-  "rootHeight",
-  "freqA",
-  "AC",
-  "shape",
-  "precision",
-  "state"
-)
 
 for (divergence in c("ELBO", "KLpq-10")) {
   d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
@@ -192,11 +198,11 @@ for (divergence in c("ELBO", "KLpq-10")) {
   df_m <- myrename(df_m, df.rename) %>%
     rename(state = sample) %>%
     rename(all_of(lookup)) %>%
-    select(all_of(params_id), contains("popSize"))
+    select(all_of(params_id), contains("popSize"), "state")
   df_v <- myrename(df_v, df.rename) %>%
     rename(state = sample) %>%
     rename(all_of(lookup)) %>%
-    select(all_of(params_id), contains("popSize"))
+    select(all_of(params_id), contains("popSize"), "state")
 
   states <- as.numeric(df_m$state)
   time_per_state <- time / states[length(states)]
@@ -242,7 +248,7 @@ df2 <- cvs %>%
 g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
   my_theme +
   geom_line() +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -263,7 +269,7 @@ g <- ggplot(df2, aes(x = time, y = value, color = program)) +
   my_theme +
   geom_line() +
   scale_y_continuous(trans = "log10") +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -285,7 +291,7 @@ g <- ggplot(df2, aes(x = time, y = value, color = program)) +
   geom_line() +
   # geom_vline(xintercept=as.numeric(df.m$state)[1]) +
   scale_y_continuous(trans = "log10") +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -303,7 +309,7 @@ df2 <- cvs %>%
 g <- ggplot(df2, aes(x = time, y = CV, color = program)) +
   my_theme +
   geom_line() +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -333,7 +339,7 @@ df2 <- df2[rowSums(is.na(df2)) == 0, ] %>% gather("param", "value", -state, -tim
 
 g <- ggplot(df2, aes(x = time, y = value, color = program)) +
   geom_line() +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   labs(x = "Time (minutes)", y = bquote((CV[i] - CV[M])^2), color = NULL)
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -371,10 +377,12 @@ for (model in c("skyglide", "skygrid")) {
       d <- if (divergence == "KLpq-10") "KL(p||q)" else divergence
 
       label <- paste("torchtree", model, d, sep = "-")
+      label2 <- paste("torchtree", d)
 
       skys <- skygrid %>%
         mutate(
           label = label,
+          label2 = label2,
           divergence = d,
           model = model,
           program = program,
@@ -387,6 +395,7 @@ for (model in c("skyglide", "skygrid")) {
         gather("param", "value") %>%
         mutate(
           label = label,
+          label2 = label2,
           divergence = d,
           program = program,
           model = model,
@@ -400,6 +409,7 @@ for (model in c("skyglide", "skygrid")) {
         gather("param", "value") %>%
         mutate(
           label = label,
+          label2 = label2,
           divergence = d,
           program = program,
           model = model,
@@ -423,12 +433,13 @@ for (model in c("skyglide", "skygrid")) {
     }
   }
 }
-skys <- skys %>% mutate_at(c("pop_size_low", "pop_size_high", "pop_size"), exp)
+skys <- skys %>% mutate(across(c("trajectory_low", "trajectory_high", "trajectory"), exp))
 ```
 
 ```{r}
 for (model in c("skyglide", "skygrid")) {
   label <- paste("torchtree", model, "HMC", sep = "-")
+  label2 <- paste("torchtree", "HMC")
 
   df <- read.csv(
     file.path(
@@ -455,15 +466,15 @@ for (model in c("skyglide", "skygrid")) {
   skys <- skygrid %>%
     mutate(
       label = label,
+      label2 = label2,
       divergence = NA,
       model = model,
       program = "torchtree",
       algorithm = "HMC"
     ) %>%
-    mutate_at(c("pop_size_low", "pop_size_high", "pop_size"), exp) %>%
+    mutate(across(c("trajectory_low", "trajectory_high", "trajectory"), exp)) %>%
     bind_rows(skys)
 
-  params_id <- c("rootHeight", "freqA", "AC", "shape", "precision")
   probs_id <- c("likelihood", "prior", "coalescent")
 
   df_hmc <- df %>%
@@ -474,6 +485,7 @@ for (model in c("skyglide", "skygrid")) {
     gather("param", "value") %>%
     mutate(
       label = label,
+      label2 = label2,
       divergence = NA,
       program = "torchtree",
       model = model
@@ -497,7 +509,7 @@ df_params <- params %>%
 g <- ggplot(df_params, aes(value, group = label, colour = label)) +
   my_theme +
   geom_density() +
-  facet_wrap(~param, scales = "free") +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   labs(colour = NULL, x = "Value", y = "Density")
 
 reposition_legend(g, "center", panel = "panel-3-2")
@@ -528,7 +540,7 @@ kable(times)
 ## Parameter densities with skygrid and skyglide
 ```{r}
 ggplot(params, aes(value, colour = label)) +
-  my_theme + 
+  my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
   labs(colour = NULL, x = "Value", y = "Density")
@@ -539,7 +551,7 @@ ggplot(params, aes(value, colour = label)) +
 ## Densities with skygrid and skyglide
 ```{r}
 ggplot(probs, aes(value, colour = label)) +
-  my_theme + 
+  my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
   labs(colour = NULL, x = "Value", y = "Density")
@@ -554,6 +566,7 @@ df <- params %>%
 g <- ggplot(df, aes(value, colour = label)) +
   my_theme +
   geom_density() +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
   facet_wrap(~param, scales = "free") +
   labs(x = "Value", y = "Density", colour = NULL)
 
@@ -564,13 +577,18 @@ reposition_legend(g, "center", panel = "panel-3-2")
 
 # Skygrid and skyglide plots
 ```{r sky-plots}
-skys2 <- skys %>% mutate(
-  proghow = str_replace(label, "-skyg\\w+", ""),
-  model = factor(model, levels = c("skygrid", "skyglide")),
-  proghow = factor(proghow, levels = c("BEAST", "torchtree-ELBO", "torchtree-KL(p||q)", "torchtree-HMC"))
-)
-skyplot(skys2, fill_by = "proghow", facet = list(rows = "model", cols = "proghow")) +
-  theme(legend.position = "none")
+cbbPalette <- c("#999999", "#009E73", "#0072B2", "#D55E00")
+skys2 <- skys %>%
+  mutate(model = stringr::str_to_title(model)) %>%
+  mutate(
+    proghow = str_replace(label, "-skyg\\w+", ""),
+    model = factor(model, levels = c("Skygrid", "Skyglide")),
+    label2 = factor(label2, levels = c("BEAST MCMC", "torchtree HMC", "torchtree ELBO", "torchtree KL(p||q)"))
+  )
+skyplot(skys2, fill_by = "label2", facet = list(rows = "model", cols = "label2")) +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  scale_x_continuous(breaks = c(1700, 1800, 1900, 2000)) +
+  scale_fill_manual(values = cbbPalette, name = "fill")
 ```
 
 \newpage
@@ -579,8 +597,30 @@ skyplot(skys2, fill_by = "proghow", facet = list(rows = "model", cols = "proghow
 ```{r}
 infos <- NULL
 for (coalescent in c("skyglide", "skygrid")) {
-  for (divergence in c("ELBO", "KLpq-10")) {
-    for (engine in c("physher", "torchtree")) {
+  path <- file.path("results", "HCV", "beast", coalescent)
+  t <- parse_time(file.path(path, "beast.log"))
+  info <- data.frame(
+    dataset = "HCV", model = "GTR", engine = "BEAST", time = t,
+    divergence = "", iters = 50000000, elbo = "",
+    coalescent = coalescent
+  )
+  infos <- rbind(infos, info)
+
+  for (engine in c("physher", "torchtree")) {
+    for (algorithm in c("hmc", "mcmc")) {
+    path <- file.path("results", "HCV", "torchtree", "GTR", coalescent, algorithm, engine)
+    if (file.exists(path)) {
+      t <- parse_time(file.path(path, "torchtree.log"))
+      info <- data.frame(
+        dataset = "HCV", model = "GTR", engine = engine, time = t,
+        divergence = toupper(algorithm), iters = 1000000, elbo = "",
+        coalescent = coalescent
+      )
+      infos <- rbind(infos, info)
+    }
+    }
+
+    for (divergence in c("ELBO", "KLpq-10")) {
       path <- file.path("results", "HCV", "torchtree", "GTR", coalescent, divergence, engine)
       if (file.exists(path)) {
         info <- read.csv(file.path(path, "info.csv"))
@@ -589,5 +629,11 @@ for (coalescent in c("skyglide", "skygrid")) {
     }
   }
 }
+infos <- mutate(infos, "time (hours)" = time / 24, "hours/million" = time / iters * 1e6 / 24) %>%
+  select(-dataset, -model) %>%
+  mutate(program = ifelse(engine == "BEAST", "BEAST", "torchtree")) %>%
+  mutate(engine = ifelse(engine == "BEAST", "MCMC", engine)) %>%
+  mutate(engine = ifelse(engine == "torchtree", "AD", engine)) %>%
+  select(program, engine, divergence, `time (hours)`, iters, `hours/million`, coalescent, elbo)
 kable(infos)
 ```
