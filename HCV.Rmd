@@ -52,6 +52,7 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
     algorithm = "MCMC",
     model = model,
     program = "BEAST",
+    engine = "BEAGLE",
     label = paste0("BEAST-", model),
     label2 = "BEAST MCMC"
   )
@@ -66,6 +67,7 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
       algorithm = "MCMC",
       model = model,
       program = "BEAST",
+      engine = "BEAGLE",
       label = paste0("BEAST-", model),
       label2 = "BEAST MCMC"
     )
@@ -78,6 +80,7 @@ parse_beast <- function(log_file, model, burnin = 0.1) {
       algorithm = "MCMC",
       model = model,
       program = "BEAST",
+      engine = "BEAGLE",
       label = paste0("BEAST-", model),
       label2 = "BEAST MCMC"
     )
@@ -347,7 +350,6 @@ reposition_legend(g, "center", panel = "panel-3-2")
 
 \newpage
 
-# Skygrid
 ```{r}
 c(params, probs, skys, times) %<-% parse_beast(file.path("results", "HCV", "beast", "skygrid", "HCV.log"), "skygrid", 0.1)
 data <- parse_beast(file.path("results", "HCV", "beast", "skyglide", "HCV.log"), "skyglide", 0.1)
@@ -355,12 +357,12 @@ skys <- rbind(skys, data$sky)
 params <- rbind(params, data$params)
 probs <- rbind(probs, data$probs)
 times <- rbind(times, data$time)
-times <- times %>% mutate(program = "BEAST", divergence = NA, algorithm = "MCMC")
+times <- times %>% mutate(program = "BEAST", divergence = NA, algorithm = "MCMC", engine = "BEAGLE")
 
 for (model in c("skyglide", "skygrid")) {
   for (divergence in c("ELBO", "KLpq-10")) {
-    for (program in c("physher")) {
-      path <- file.path("results", "HCV", "torchtree", "GTR", model, divergence, program)
+    for (engine in c("physher")) {
+      path <- file.path("results", "HCV", "torchtree", "GTR", model, divergence, engine)
       df <- read.csv(file.path(path, "samples.csv"), sep = "\t")
       df <- myrename(df, df.rename)
 
@@ -385,7 +387,8 @@ for (model in c("skyglide", "skygrid")) {
           label2 = label2,
           divergence = d,
           model = model,
-          program = program,
+          program = "torchtree",
+          engine = engine,
           algorithm = "VB",
         ) %>%
         bind_rows(skys)
@@ -397,8 +400,9 @@ for (model in c("skyglide", "skygrid")) {
           label = label,
           label2 = label2,
           divergence = d,
-          program = program,
+          program = "torchtree",
           model = model,
+          engine = engine,
           algorithm = "VB",
         ) %>%
         bind_rows(params)
@@ -411,8 +415,9 @@ for (model in c("skyglide", "skygrid")) {
           label = label,
           label2 = label2,
           divergence = d,
-          program = program,
+          program = "torchtree",
           model = model,
+          engine = engine,
           algorithm = "VB",
         ) %>%
         bind_rows(probs)
@@ -426,7 +431,8 @@ for (model in c("skyglide", "skygrid")) {
         divergence = d,
         model = model,
         algorithm = "VB",
-        program = program,
+        program = "torchtree",
+        engine = engine,
         iterations = iterations
       ) %>%
         bind_rows(times)
@@ -437,23 +443,19 @@ skys <- skys %>% mutate(across(c("trajectory_low", "trajectory_high", "trajector
 ```
 
 ```{r}
-for (model in c("skyglide", "skygrid")) {
-  label <- paste("torchtree", model, "HMC", sep = "-")
-  label2 <- paste("torchtree", "HMC")
+pp <- file.path("results", "HCV", "torchtree", "GTR")
 
-  df <- read.csv(
-    file.path(
-      "results",
-      "HCV",
-      "torchtree",
-      "GTR",
-      model,
-      "hmc",
-      "physher",
-      "samples.csv"
-    ),
-    sep = "\t"
-  )
+for (model in c("skyglide", "skygrid")) {
+  for (algorithm in c("mcmc", "hmc")) {
+    for (engine in c("physher")) {
+      label <- paste("torchtree", model, toupper(algorithm), sep = "-")
+      label2 <- paste("torchtree", toupper(algorithm))
+
+      p <- file.path(pp, model, algorithm, engine, "samples.csv")
+
+      if (!file.exists(p)) next
+
+      df <- read.csv(p, sep = "\t")
   df <- df[(0.2 * nrow(df)):nrow(df), ]
   df <- myrename(df, df.rename)
 
@@ -470,7 +472,8 @@ for (model in c("skyglide", "skygrid")) {
       divergence = NA,
       model = model,
       program = "torchtree",
-      algorithm = "HMC"
+          engine = engine,
+          algorithm = algorithm
     ) %>%
     mutate(across(c("trajectory_low", "trajectory_high", "trajectory"), exp)) %>%
     bind_rows(skys)
@@ -488,7 +491,9 @@ for (model in c("skyglide", "skygrid")) {
       label2 = label2,
       divergence = NA,
       program = "torchtree",
-      model = model
+          engine = engine,
+          model = model,
+          algorithm = algorithm
     )
 
   params <- df_hmc %>%
@@ -498,19 +503,55 @@ for (model in c("skyglide", "skygrid")) {
   probs <- df_hmc %>%
     filter(param %in% probs_id) %>%
     bind_rows(probs)
+    }
+  }
 }
 ```
+
+# Skygrid
 
 ## Parameter densities with skygrid
 ```{r skygrid-params}
 df_params <- params %>%
-  filter(model == "skygrid")
+  filter(model == "skygrid", engine != "torchtree") %>%
+  filter(label2 != "torchtree MCMC") %>%
+  mutate(label2 = factor(label2, levels = c("BEAST MCMC", "torchtree HMC", "torchtree ELBO", "torchtree KL(p||q)")))
 
-g <- ggplot(df_params, aes(value, group = label, colour = label)) +
+df_params_beast <- df_params %>% filter(program == "BEAST")
+df_params_rest <- df_params %>% filter(program != "BEAST")
+
+g <- ggplot() +
   my_theme +
-  geom_density() +
+  geom_histogram(data = df_params_beast, aes(x = value, y = after_stat(density), colour = label2), fill = "#999999", alpha = 0.5, bins = 50, position = "identity") +
+  stat_density(data = df_params_rest, aes(x = value, colour = label2), geom = "line", position = "identity", trim = T) +
+  scale_color_manual(values = c("#999999", "#009E73", "#0072B2", "#D55E00")) +
   facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
-  labs(colour = NULL, x = "Value", y = "Density")
+  labs(colour = NULL, fill = NULL, x = "Value", y = "Density")
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+
+\newpage
+
+```{r}
+df_params <- params %>%
+  filter(model == "skygrid", engine != "torchtree") %>%
+  mutate(label2 = factor(label2, levels = c("BEAST MCMC", "torchtree HMC", "torchtree MCMC", "torchtree ELBO", "torchtree KL(p||q)")))
+
+df_params_beast <- df_params %>% filter(program == "BEAST")
+df_params_rest <- df_params %>% filter(program != "BEAST")
+
+# cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+cbbPalette <- c("#999999", "#009E73", "#E69F00", "#0072B2", "#D55E00")
+
+g <- ggplot() +
+  my_theme +
+  geom_histogram(data = df_params_beast, aes(x = value, y = after_stat(density), colour = label2), fill = "#999999", alpha = 0.5, bins = 50, position = "identity") +
+  # geom_density(data = df_params_rest, aes(x = value, colour = label2), alpha = 1, position = "identity") +
+  stat_density(data = df_params_rest, aes(x = value, colour = label2), geom = "line", position = "identity", trim = T) +
+  scale_color_manual(values = cbbPalette) +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  labs(colour = NULL, fill = NULL, x = "Value", y = "Density")
 
 reposition_legend(g, "center", panel = "panel-3-2")
 ```
@@ -520,7 +561,7 @@ reposition_legend(g, "center", panel = "panel-3-2")
 ## Densities with skygrid
 ```{r skygrid-probs}
 df_probs <- probs %>%
-  filter(model == "skygrid")
+  filter(model == "skygrid", engine != "torchtree")
 
 ggplot(df_probs, aes(value, group = label, colour = label)) +
   my_theme +
@@ -537,9 +578,105 @@ kable(times)
 
 \newpage
 
+# Skyglide 
+
+## Parameter densities with skyglide
+```{r skyglide-params}
+df_params <- params %>%
+  filter(model == "skyglide", engine != "torchtree") %>%
+  filter(label2 != "torchtree MCMC") %>%
+  mutate(label2 = factor(label2, levels = c("BEAST MCMC", "torchtree HMC", "torchtree ELBO", "torchtree KL(p||q)")))
+
+df_params_beast <- df_params %>% filter(program == "BEAST")
+df_params_rest <- df_params %>% filter(program != "BEAST")
+
+cbbPalette <- c("#999999", "#009E73", "#0072B2", "#D55E00")
+
+g <- ggplot() +
+  my_theme +
+  geom_histogram(
+    data = df_params_beast,
+    aes(x = value, y = after_stat(density), colour = label2),
+    fill = "#999999", alpha = 0.5, bins = 50, position = "identity"
+  ) +
+  # geom_density(data = df_params_rest, aes(x = value, colour = label), alpha = 1, position = "identity") +
+  stat_density(data = df_params_rest, aes(x = value, colour = label2), geom = "line", position = "identity", trim = T) +
+  scale_color_manual(values = cbbPalette) +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  labs(colour = NULL, fill = NULL, x = "Value", y = "Density")
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+
+\newpage
+
+```{r}
+df_params <- params %>%
+  filter(model == "skyglide", engine != "torchtree") %>%
+  mutate(label2 = factor(label2, levels = c("BEAST MCMC", "torchtree HMC", "torchtree MCMC", "torchtree ELBO", "torchtree KL(p||q)")))
+
+df_params_beast <- df_params %>% filter(program == "BEAST")
+df_params_rest <- df_params %>% filter(program != "BEAST")
+
+cbbPalette <- c("#999999", "#009E73", "#E69F00", "#0072B2", "#D55E00")
+
+g <- ggplot() +
+  my_theme +
+  geom_histogram(
+    data = df_params_beast,
+    aes(x = value, y = after_stat(density), colour = label2),
+    fill = "#999999", alpha = 0.5, bins = 50, position = "identity"
+  ) +
+  # geom_density(data = df_params_rest, aes(x = value, colour = label), alpha = 1, position = "identity") +
+  stat_density(data = df_params_rest, aes(x = value, colour = label2), geom = "line", position = "identity", trim = T) +
+  scale_color_manual(values = cbbPalette) +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  labs(colour = NULL, fill = NULL, x = "Value", y = "Density")
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+
+\newpage
+
+## Densities with skyglide
+```{r skyglide-probs}
+df_probs <- probs %>%
+  filter(model == "skyglide", engine != "torchtree")
+
+ggplot(df_probs, aes(value, group = label, colour = label)) +
+  my_theme +
+  geom_density() +
+  facet_wrap(~param, scales = "free", nrow = 2) +
+  labs(colour = NULL, x = "Value", y = "Density")
+```
+
+\newpage
+
+# Skygrid and skyglide
+
+## Just BEAST
+```{r sky-beast}
+df <- params %>%
+  filter(program == "BEAST")
+
+g <- ggplot(df, aes(value, colour = label)) +
+  my_theme +
+  geom_density() +
+  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
+  labs(x = "Value", y = "Density", colour = NULL)
+
+reposition_legend(g, "center", panel = "panel-3-2")
+```
+```
+
+\newpage
+
 ## Parameter densities with skygrid and skyglide
 ```{r}
-ggplot(params, aes(value, colour = label)) +
+df <- params %>%
+  filter(engine != "torchtree")
+
+ggplot(df, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
@@ -550,7 +687,10 @@ ggplot(params, aes(value, colour = label)) +
 
 ## Densities with skygrid and skyglide
 ```{r}
-ggplot(probs, aes(value, colour = label)) +
+df <- probs %>%
+  filter(engine != "torchtree")
+
+ggplot(df, aes(value, colour = label)) +
   my_theme +
   geom_density() +
   facet_wrap(~param, scales = "free") +
@@ -559,36 +699,22 @@ ggplot(probs, aes(value, colour = label)) +
 
 \newpage
 
-```{r skyglide-params}
-df <- params %>%
-  filter((model != "skygrid" | program == "BEAST")) # & algorithm != "HMC")
-
-g <- ggplot(df, aes(value, colour = label)) +
-  my_theme +
-  geom_density() +
-  facet_wrap(~param, scales = "free", labeller = human_readable_labeller) +
-  facet_wrap(~param, scales = "free") +
-  labs(x = "Value", y = "Density", colour = NULL)
-
-reposition_legend(g, "center", panel = "panel-3-2")
-```
-
-\newpage
-
-# Skygrid and skyglide plots
+## Skygrid and skyglide plots
 ```{r sky-plots}
 cbbPalette <- c("#999999", "#009E73", "#0072B2", "#D55E00")
 skys2 <- skys %>%
-  mutate(model = stringr::str_to_title(model)) %>%
+  filter(label2 != "torchtree MCMC", engine != "torchtree") %>%
   mutate(
     proghow = str_replace(label, "-skyg\\w+", ""),
-    model = factor(model, levels = c("Skygrid", "Skyglide")),
+    model = factor(model, levels = c("skygrid", "skyglide")),
     label2 = factor(label2, levels = c("BEAST MCMC", "torchtree HMC", "torchtree ELBO", "torchtree KL(p||q)"))
   )
 skyplot(skys2, fill_by = "label2", facet = list(rows = "model", cols = "label2")) +
   theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
   scale_x_continuous(breaks = c(1700, 1800, 1900, 2000)) +
-  scale_fill_manual(values = cbbPalette, name = "fill")
+  scale_fill_manual(values = cbbPalette, name = "fill") +
+  labs(x = "Year", y = "Effective population size")
+```
 ```
 
 \newpage
@@ -600,9 +726,9 @@ for (coalescent in c("skyglide", "skygrid")) {
   path <- file.path("results", "HCV", "beast", coalescent)
   t <- parse_time(file.path(path, "beast.log"))
   info <- data.frame(
-    dataset = "HCV", model = "GTR", engine = "BEAST", time = t,
+    dataset = "HCV", model = "GTR", engine = "BEAGLE", time = t,
     divergence = "", iters = 50000000, elbo = "",
-    coalescent = coalescent
+    coalescent = coalescent, program = "BEAST"
   )
   infos <- rbind(infos, info)
 
@@ -613,8 +739,8 @@ for (coalescent in c("skyglide", "skygrid")) {
       t <- parse_time(file.path(path, "torchtree.log"))
       info <- data.frame(
         dataset = "HCV", model = "GTR", engine = engine, time = t,
-        divergence = toupper(algorithm), iters = 1000000, elbo = "",
-        coalescent = coalescent
+          divergence = toupper(algorithm), iters = 10000000, elbo = "",
+          coalescent = coalescent, program = "torchtree"
       )
       infos <- rbind(infos, info)
     }
@@ -623,7 +749,7 @@ for (coalescent in c("skyglide", "skygrid")) {
     for (divergence in c("ELBO", "KLpq-10")) {
       path <- file.path("results", "HCV", "torchtree", "GTR", coalescent, divergence, engine)
       if (file.exists(path)) {
-        info <- read.csv(file.path(path, "info.csv"))
+        info <- read.csv(file.path(path, "info.csv")) %>% mutate(program = "torchtree")
         infos <- rbind(infos, info)
       }
     }
@@ -631,8 +757,6 @@ for (coalescent in c("skyglide", "skygrid")) {
 }
 infos <- mutate(infos, "time (hours)" = time / 24, "hours/million" = time / iters * 1e6 / 24) %>%
   select(-dataset, -model) %>%
-  mutate(program = ifelse(engine == "BEAST", "BEAST", "torchtree")) %>%
-  mutate(engine = ifelse(engine == "BEAST", "MCMC", engine)) %>%
   mutate(engine = ifelse(engine == "torchtree", "AD", engine)) %>%
   select(program, engine, divergence, `time (hours)`, iters, `hours/million`, coalescent, elbo)
 kable(infos)

@@ -36,19 +36,16 @@ RUN tar -xzvf iqtree-2.2.2.6-Linux.tar.gz && chmod +x /iqtree-2.2.2.6-Linux/bin/
 RUN wget https://github.com/tothuhien/lsd2/releases/download/v.2.3/lsd2_unix \
 	&& chmod +x lsd2_unix && mv lsd2_unix /usr/local/bin/lsd2
 
-RUN git clone https://github.com/4ment/physher.git /physher
-RUN cmake -S /physher -B /physher/build -DBUILD_CPP_WRAPPER=on -DBUILD_TESTING=on
-RUN cmake --build /physher/build/ --target install
+RUN wget https://github.com/4ment/physher/archive/refs/tags/v2.0.1.tar.gz
+RUN tar -xzvf v2.0.1.tar.gz
+RUN cmake -S /physher-2.0.1 -B /physher-2.0.1/build -DBUILD_CPP_WRAPPER=on -DBUILD_TESTING=on
+RUN cmake --build /physher-2.0.1/build/ --target install
 
-# autodiff programs
-RUN git clone https://github.com/4ment/torchtree /torchtree
-RUN pip install torch==1.12.1 numpy==1.22 /torchtree \
+RUN pip install torch==1.12.1 numpy==1.22 torchtree==1.0.2 \
 	&& torchtree --help
 
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 ENV LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib
 
-RUN git clone https://github.com/4ment/torchtree-physher /torchtree-physher
-RUN pip install /torchtree-physher
+RUN pip install torchtree-physher==1.0.0 torchtree-scipy==1.0.0
 
-RUN pip install torchtree-scipy=1.0.0

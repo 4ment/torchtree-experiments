@@ -4,7 +4,7 @@
 
 This repository contains the pipeline and data supporting the results of the following article:
 
-Fourment M _et al._ ... coming soon...
+Mathieu Fourment, Matthew Macaulay, Christiaan J Swanepoel, Xiang Ji, Marc A Suchard, Frederick A Matsen IV. torchtree: flexible phylogenetic model development and inference using PyTorch. [arXiv:2406.18044](https://arxiv.org/abs/2406.18044)
 
 ## Data
 
@@ -26,17 +26,15 @@ To execute this pipeline, it is necessary to install [nextflow](https://www.next
 ### Installing dependencies with conda
     conda env create -f environment.yml
     conda activate torchtree-experiments
-
-    git clone https://github.com/4ment/physher
-    cmake -S physher/ -B physher/build -DBUILD_CPP_WRAPPER=on -DBUILD_TESTING=on -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX/envs/torchtree-experiments
-    cmake --build physher/build/ --target install
+    
+    RUN wget https://github.com/4ment/physher/archive/refs/tags/v2.0.1.tar.gz
+    tar -xzvf v2.0.1.tar.gz
+    cmake -S physher-2.0.1 -B physher-2.0.1/build -DBUILD_CPP_WRAPPER=on -DBUILD_TESTING=on -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX/envs/torchtree-experiments
+    cmake --build physher-2.0.1/build/ --target install
     export LIBRARY_PATH=$LIBRARY_PATH:$CONDA_PREFIX/envs/torchtree-experiments/lib
 
-    git clone http://github.com/4ment/torchtree.git
-    pip install torchtree/
-    git clone http://github.com/4ment/torchtree-physher.git
-    pip install torchtree-physher/
-    pip install torchtree-scipy=1.0.0
+    pip install torch==1.12.1 numpy==1.22 torchtree==1.0.2
+    pip install torchtree-physher==1.0.0 torchtree-scipy==1.0.0
 
 ### Running the pipeline
 
@@ -69,7 +67,7 @@ Generate figures in a single pdf:
 
 Note:
 
-rmarkdown requires pandoc to be installed. The conda environment provided in this repo include pandoc.
+rmarkdown requires pandoc to be installed. The conda environment provided in this repo includes pandoc.
 It is also possible to use RStudio to run the `index.Rmd` script.
 
 
@@ -80,8 +78,8 @@ For reproducibility, we provide below the version of each library/program used i
 | Program/Library | Version |
 | --------------- | ------- |
 | [physher]           | 2.0.1 |
-| [torchtree]         | 1.0.1 |
-| [torchtree-physher] | 1.0.1 |
+| [torchtree]         | 1.0.2 |
+| [torchtree-physher] | 1.0.0 |
 | [torchtree-scipy]   | 1.0.0 |
 | [pytorch]           | 1.12.1 |
 
